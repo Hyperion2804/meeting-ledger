@@ -109,9 +109,22 @@ $("signin-form").addEventListener("submit", async (e) => {
     } catch (e1) {
       // First-ever sign-in for this address creates the account and
       // asks them to confirm the inbox before they can do anything.
-      if (e1.code === "auth/user-not-found") {
-        const cred = await createUserWithEmailAndPassword(auth, email, pw);
-        await sendEmailVerification(cred.user);
+      // Modern Firebase projects hide whether an email exists (privacy
+      // feature). "No account" and "wrong password" can BOTH arrive as
+      // auth/invalid-credential, so we can't tell them apart from the
+      // error code alone — we have to actually try creating the account.
+      if (e1.code === "auth/user-not-found" || e1.code === "auth/invalid-credential") {
+        try {
+          const cred = await createUserWithEmailAndPassword(auth, email, pw);
+          await sendEmailVerification(cred.user);
+        } catch (e3) {
+          // Account really did exist — it was just the wrong password.
+          if (e3.code === "auth/email-already-in-use") {
+            say(sErr, "That password doesn't match. Use 'Set or reset my password' if you've forgotten it.");
+          } else {
+            say(sErr, authMessage(e3));
+          }
+        }
       } else throw e1;
     }
   } catch (e2) {
