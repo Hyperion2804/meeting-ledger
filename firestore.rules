@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// ============================================================
+//  Meeting Ledger — security rules
+//
+//  IMPORTANT: edit emailPattern() below with your real domain,
+//  then paste the whole file into
+//  Firebase Console -> Firestore Database -> Rules -> Publish.
+//
+//  These rules are the ONLY thing protecting your data. The app's
+//  screens just hide things; the rules actually enforce them.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // EDIT THIS ONE LINE. Escape the dots as [.] — it is a regex.
+    function emailPattern() {
+      return '^[^@]+@yourcompany[.]com$';
+    }
+
+    function callerEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // Signed in, inbox confirmed, and on our domain.
+    function onDomain() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && callerEmail().matches(emailPattern());
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(callerEmail())).data;
+    }
+
+    // On the domain AND on the team list AND not switched off.
+    function isMember() {
+      return onDomain()
+        && exists(/databases/$(database)/documents/users/$(callerEmail()))
+        && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isMember() && profile().role == 'admin';
+    }
+
+    function isFounder() {
+      return isMember() && profile().role == 'founder';
+    }
+
+    // Admin and Founder both see every meeting. Only Admin manages the team.
+    function canViewAll() {
+      return isAdmin() || isFounder();
+    }
+
+    // ---------- the team list ----------
+    // Everyone reads only their own entry. Admins read and write all.
+    match /users/{email} {
+      allow get:    if isAdmin() || (onDomain() && callerEmail() == email);
+      allow list:   if isAdmin();
+      allow write:  if isAdmin();
+    }
+
+    // ---------- meetings ----------
+    // An RM only ever touches rows carrying their own email.
+    // Admins see everything.
+    match /meetings/{meetingId} {
+      allow get, list: if canViewAll()
+        || (isMember() && resource.data.rmEmail == callerEmail());
+
+      allow create: if isMember()
+        && request.resource.data.rmEmail == callerEmail()
+        && request.resource.data.date is string
+        && request.resource.data.prospectName is string
+        && request.resource.data.prospectName.size() > 0;
+
+      allow update: if isAdmin()
+        || (isMember()
+            && resource.data.rmEmail == callerEmail()
+            && request.resource.data.rmEmail == callerEmail());
+
+      allow delete: if isAdmin()
+        || (isMember() && resource.data.rmEmail == callerEmail());
+    }
+
+    // Nothing else is reachable.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
