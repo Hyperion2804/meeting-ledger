@@ -4,7 +4,7 @@
 // ============================================================
 
 // 1. Your organisation's email domain. Only these addresses can sign in.
-export const ORG_DOMAIN = "yourdomain.com";   // <-- put your real GoDaddy domain here
+export const ORG_DOMAIN = "hyperioncapital.in";   
 
 // 2. Your Firebase project's config (from Firebase Console -> Project settings).
 export const firebaseConfig = {
