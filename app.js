@@ -2002,14 +2002,14 @@ function renderTeam() {
   const editField = (email, field, value) =>
     `<input type="text" class="team-edit" data-field="${field}" data-email="${esc(email)}" value="${esc(value || "")}" />`;
 
-  const teamLeads = state.team.filter((u) => u.role === "teamlead");
+  const managers = state.team.filter((u) => u.role === "teamlead" || u.role === "admin");
   const managerCell = (u) => {
-    if (u.role !== "rm") return "—";   // only RMs report to a Team Lead
+    if (u.role !== "rm") return "—";   // only RMs report to a manager
     const opts = [`<option value=""${!u.managedBy ? " selected" : ""}>— none —</option>`]
-      .concat(teamLeads.map((tl) => `<option value="${esc(tl.email)}"${u.managedBy === tl.email ? " selected" : ""}>${esc(tl.name || tl.email)}</option>`));
+      .concat(managers.map((m) => `<option value="${esc(m.email)}"${u.managedBy === m.email ? " selected" : ""}>${esc(m.name || m.email)} (${roleLabel(m.role)})</option>`));
     return editable
       ? `<select class="manager-select" data-manager="${esc(u.email)}">${opts.join("")}</select>`
-      : esc((teamLeads.find((tl) => tl.email === u.managedBy) || {}).name || "—");
+      : esc((managers.find((m) => m.email === u.managedBy) || {}).name || "—");
   };
 
   $("tbl-team").innerHTML = `<thead><tr>
@@ -2045,7 +2045,7 @@ function renderTeam() {
       try {
         await updateDoc(doc(db, "users", email), { managedBy: sel.value });
         u.managedBy = sel.value;
-        toast(sel.value ? `${u.name || email} now reports to ${(teamLeads.find((tl) => tl.email === sel.value) || {}).name || sel.value}` : `${u.name || email} no longer has a Team Lead`);
+        toast(sel.value ? `${u.name || email} now reports to ${(managers.find((m) => m.email === sel.value) || {}).name || sel.value}` : `${u.name || email} no longer has a manager assigned`);
       } catch (e) {
         toast("Couldn't change that. " + (e.message || ""));
       }
