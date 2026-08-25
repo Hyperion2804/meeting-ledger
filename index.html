@@ -353,6 +353,7 @@
     <nav class="subtabs" id="master-subtabs" role="tablist">
       <button class="subtab" data-sub="dashboard" role="tab" aria-selected="true">Dashboard</button>
       <button class="subtab" data-sub="sheets" role="tab" aria-selected="false">Sheets</button>
+      <button class="subtab" data-sub="day" role="tab" aria-selected="false">Day view</button>
     </nav>
 
     <div id="master-panel-dashboard">
@@ -415,6 +416,53 @@
           <span class="card-note" id="all-count"></span>
         </div>
         <div class="scroller"><table id="tbl-all" class="grid"></table></div>
+      </section>
+    </div>
+
+    <div id="master-panel-day" hidden>
+      <div class="page-head-controls sub-controls">
+        <input type="date" id="day-view-date" class="month-input" />
+        <span class="lede" id="day-view-label"></span>
+      </div>
+
+      <section class="card">
+        <div class="card-head"><h2 id="day-before-title">Before this day</h2></div>
+        <div class="funnel" aria-label="Funnel before the selected day">
+          <div id="day-before-funnel" class="funnel-bands"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2 id="day-on-title">On this day</h2></div>
+        <div class="funnel" aria-label="Funnel for the selected day">
+          <div id="day-on-funnel" class="funnel-bands"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Plan vs achievement</h2></div>
+        <div class="scroller"><table id="tbl-day-achieve" class="grid"></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>By relationship manager</h2></div>
+        <div id="day-rm-segment-tables"></div>
+      </section>
+
+      <section class="card" id="day-leads-card">
+        <div class="card-head">
+          <h2>Leads shared with the team</h2>
+          <span class="card-note" id="day-leads-count"></span>
+        </div>
+        <div class="scroller"><table id="tbl-day-leads" class="grid"></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Every meeting</h2>
+          <span class="card-note" id="day-all-count"></span>
+        </div>
+        <div class="scroller"><table id="tbl-day-all" class="grid"></table></div>
       </section>
     </div>
   </main>
