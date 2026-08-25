@@ -93,20 +93,6 @@ function sourceDetail(r) {
   return r.source;
 }
 
-// Next Stage column. A meeting's own `progressed` field still covers
-// Investor rows directly. For WM/CP rows where leads carry their own
-// status instead, roll those up into "2 of 3 done" so the column stays
-// meaningful instead of going blank.
-function nextStageDisplay(r, allLeads) {
-  const wmcp = r.personType === "Wealth Manager" || r.personType === "Channel Partner";
-  if (wmcp && r.shared === "Yes") {
-    const rLeads = (allLeads || []).filter((l) => l.meetingId === r.id);
-    if (!rLeads.length) return "—";
-    const done = rLeads.filter((l) => l.status === "Meeting Done").length;
-    return `${done} of ${rLeads.length} done`;
-  }
-  return r.progressed || "—";
-}
 
 /* ============================ auth ============================ */
 $("domain-label").textContent = ORG_DOMAIN;
@@ -1298,18 +1284,18 @@ function renderHistory(mine) {
   $("tbl-history").innerHTML = `<thead><tr>
     <th>Date</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th><th>Source</th><th>Result</th>
-    <th>Lead / docs</th><th>Next stage</th><th>Follow-up</th><th>Remarks</th><th></th>
+    <th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
     </tr></thead><tbody>${
       rows.length ? rows.map((r) => `<tr>
         <td class="num">${esc(r.date)}</td><td class="name">${esc(r.prospectName)}</td>
         <td>${esc(r.personType)}</td><td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone || "")}</td><td>${esc(r.email || "")}</td><td class="wrap">${esc(r.address || "")}</td>
         <td>${esc(sourceDetail(r))}</td><td>${resultTag(r.result)}</td>
-        <td>${esc(r.shared || "—")}</td><td>${esc(nextStageDisplay(r, state.myLeads))}</td>
+        <td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td>
         <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
-        : `<tr><td colspan="15" class="empty">Nothing logged in this range.</td></tr>`
+        : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
     }</tbody>`;
 
   $("tbl-history").querySelectorAll("[data-edit]").forEach((b) =>
@@ -1449,7 +1435,7 @@ $("achieve-date").value = todayISO();
 $("achieve-date").max = todayISO();
 $("achieve-date").addEventListener("change", renderMaster);
 
-/* master sub-tabs: Dashboard (charts) vs Sheets (funnel/tables/export data) */
+/* master sub-tabs: Dashboard (charts) vs Sheets (funnel/tables/export data) vs Day view (single-day drilldown) */
 let masterSub = "dashboard";
 $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
   b.addEventListener("click", () => {
@@ -1458,7 +1444,16 @@ $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
       x.setAttribute("aria-selected", String(x === b)));
     $("master-panel-dashboard").hidden = masterSub !== "dashboard";
     $("master-panel-sheets").hidden = masterSub !== "sheets";
+    $("master-panel-day").hidden = masterSub !== "day";
+    if (masterSub === "day") renderDayView();
   }));
+
+$("day-view-date").value = todayISO();
+$("day-view-date").max = todayISO();
+$("day-view-date").addEventListener("change", renderDayView);
+// The same "All RMs" filter used on Dashboard/Sheets applies here too —
+// one shared control, not a second one to keep in sync.
+$("master-rm-filter").addEventListener("change", () => { if (masterSub === "day") renderDayView(); });
 
 /* ============================ visual dashboard ============================ */
 const charts = {};   // canvas id -> Chart instance, so re-render replaces rather than stacks
@@ -1583,6 +1578,27 @@ function el_empty(canvasId) {
   wrap.appendChild(p);
 }
 
+// Reusable funnel — same bands used by Sheets' main funnel and both of
+// Day view's "before" / "on this day" summaries below.
+function renderFunnelInto(containerId, rows, s, emptyLabel) {
+  const stages = [
+    ["Reachouts", s.total],
+    ["Interested", s.allInterested],
+    ["Lead / docs shared", s.allShared],
+    ["Meeting done · logged in", s.allDone]
+  ];
+  const top = Math.max(s.total, 1);
+  $(containerId).innerHTML = s.total === 0
+    ? `<p class="funnel-empty">Nothing logged for ${emptyLabel} yet.</p>`
+    : stages.map(([label2, v], i) => {
+        const w = Math.max(18, Math.round((v / top) * 100));
+        const pct = i === 0 ? "" : `${Math.round((v / top) * 100)}% of reachouts`;
+        return `<div class="f-band" style="--w:${w}%;animation-delay:${i * 90}ms">
+          <span class="f-label">${label2}</span><span class="f-num">${v}</span>
+          ${pct ? `<span class="f-pct">${pct}</span>` : ""}</div>`;
+      }).join("");
+}
+
 function renderMaster() {
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
@@ -1595,22 +1611,7 @@ function renderMaster() {
     : `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} across ${new Set(rows.map(r => r.rmEmail)).size} relationship manager${new Set(rows.map(r => r.rmEmail)).size === 1 ? "" : "s"}.`;
 
   /* --- the funnel --- */
-  const stages = [
-    ["Reachouts", s.total],
-    ["Interested", s.allInterested],
-    ["Lead / docs shared", s.allShared],
-    ["Meeting done · logged in", s.allDone]
-  ];
-  const top = Math.max(s.total, 1);
-  $("funnel-bands").innerHTML = s.total === 0
-    ? `<p class="funnel-empty">Nothing logged for ${label} yet.</p>`
-    : stages.map(([label2, v], i) => {
-        const w = Math.max(18, Math.round((v / top) * 100));
-        const pct = i === 0 ? "" : `${Math.round((v / top) * 100)}% of reachouts`;
-        return `<div class="f-band" style="--w:${w}%;animation-delay:${i * 90}ms">
-          <span class="f-label">${label2}</span><span class="f-num">${v}</span>
-          ${pct ? `<span class="f-pct">${pct}</span>` : ""}</div>`;
-      }).join("");
+  renderFunnelInto("funnel-bands", rows, s, label);
 
   /* --- by RM --- */
   const byRm = new Map();
@@ -1645,7 +1646,7 @@ function renderMaster() {
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Next stage</th><th>Remarks</th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td class="num">${esc(r.date)}</td><td>${esc(r.rmName || r.rmEmail)}</td>
@@ -1654,7 +1655,8 @@ function renderMaster() {
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td>${esc(nextStageDisplay(r, state.leads))}</td><td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
+        <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
+        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
 
@@ -1675,6 +1677,76 @@ function renderMaster() {
           : `<tr><td colspan="8" class="empty">No leads shared in this range.</td></tr>`
       }</tbody>`;
   }
+}
+
+/* ============================ master: day view ============================ */
+// A single-day drilldown: everything Sheets shows, narrowed to one date,
+// plus a "before this day" baseline funnel for context. Shares the same
+// "All RMs" filter as Dashboard/Sheets rather than a second one.
+function renderDayView() {
+  const day = $("day-view-date").value || todayISO();
+  const rmFilter = $("master-rm-filter").value;
+  const scoped = (r) => !rmFilter || r.rmEmail === rmFilter;
+
+  const before = state.meetings.filter((r) => r.date < day && scoped(r));
+  const onDay = state.meetings.filter((r) => r.date === day && scoped(r));
+  const who = rmFilter ? (state.team.find((u) => u.email === rmFilter)?.name || rmFilter) : null;
+
+  $("day-view-label").textContent = who ? `${who} only` : "All relationship managers";
+  $("day-before-title").textContent = `Before ${fmtDay(day)}`;
+  $("day-on-title").textContent = `On ${fmtDay(day)}`;
+
+  renderFunnelInto("day-before-funnel", before, summarise(before), `before ${fmtDay(day)}`);
+  renderFunnelInto("day-on-funnel", onDay, summarise(onDay), fmtDay(day));
+
+  renderAchievementInto("tbl-day-achieve", day, rmFilter);
+
+  /* --- by relationship manager, that day only --- */
+  const byRm = new Map();
+  for (const r of onDay) {
+    if (!byRm.has(r.rmEmail)) byRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
+    byRm.get(r.rmEmail).rows.push(r);
+  }
+  renderSegmentTables("day-rm-segment-tables", "Relationship manager",
+    [...byRm.values()].map((g) => ({ label: g.name, meetings: g.rows })), "All RMs");
+
+  /* --- leads shared that day (Admin/Superadmin see all, Team Lead their reports, never Observer) --- */
+  $("day-leads-card").hidden = !canSeeTeamLeads();
+  if (canSeeTeamLeads()) {
+    const leadRows = state.leads.filter((l) => l.date === day && (!rmFilter || l.rmEmail === rmFilter))
+      .sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
+    $("day-leads-count").textContent = `${leadRows.length} lead${leadRows.length === 1 ? "" : "s"}`;
+    $("tbl-day-leads").innerHTML = `<thead><tr>
+      <th>RM</th><th>Prospect</th><th>Segment</th>
+      <th>Lead name</th><th>Lead phone</th><th>Status</th><th>Lead date</th>
+      </tr></thead><tbody>${
+        leadRows.length ? leadRows.map((l) => `<tr>
+          <td>${esc(l.rmName)}</td><td class="name">${esc(l.prospectName)}</td>
+          <td>${esc(l.personType)}</td><td>${esc(l.leadName)}</td><td>${esc(l.leadPhone)}</td>
+          <td>${esc(l.status)}</td><td class="num">${esc(l.leadDate || "")}</td></tr>`).join("")
+          : `<tr><td colspan="7" class="empty">No leads shared on this day.</td></tr>`
+      }</tbody>`;
+  }
+
+  /* --- every meeting, that day only --- */
+  const sorted = [...onDay].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
+  $("day-all-count").textContent = `${sorted.length} row${sorted.length === 1 ? "" : "s"}`;
+  $("tbl-day-all").innerHTML = `<thead><tr>
+    <th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
+    <th>Phone</th><th>Email</th><th>Address</th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
+    </tr></thead><tbody>${
+      sorted.length ? sorted.map((r) => `<tr>
+        <td>${esc(r.rmName || r.rmEmail)}</td>
+        <td class="name">${esc(r.prospectName)}</td><td>${esc(r.personType)}</td>
+        <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
+        <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
+        <td>${esc(sourceDetail(r))}</td>
+        <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
+        <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
+        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
+        : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
+    }</tbody>`;
 }
 
 /* ============================ export ============================ */
@@ -1780,10 +1852,9 @@ function exportLeads() {
 }
 
 /* ============================ admin: plan vs achievement ============================ */
-function renderAchievement() {
-  const date = $("achieve-date").value || todayISO();
-  const rowsForDate = state.meetings.filter((r) => r.date === date);
-  const plansForDate = state.plans.filter((p) => p.planDate === date);
+function renderAchievementInto(tableId, date, rmFilter) {
+  const rowsForDate = state.meetings.filter((r) => r.date === date && (!rmFilter || r.rmEmail === rmFilter));
+  const plansForDate = state.plans.filter((p) => p.planDate === date && (!rmFilter || p.rmEmail === rmFilter));
 
   // "Channel" = Wealth Manager / Channel Partner. "Customer" = Investor.
   // "New" = First meeting. "Follow-up" = Follow-up meeting. Same four
@@ -1807,6 +1878,7 @@ function renderAchievement() {
   plansForDate.forEach((p) => plannedByEmail.set(p.rmEmail, p));
 
   const people = state.team.filter((u) => {
+    if (rmFilter && u.email !== rmFilter) return false;      // scoped to whichever RM is selected, if any
     if (u.role === "observer") return false;                 // never goes to meetings
     if (u.role === "superadmin") return actualByEmail.has(u.email) || plannedByEmail.has(u.email);
     return true;
@@ -1827,7 +1899,7 @@ function renderAchievement() {
       <td class="num">${pct === null ? "—" : pct + "%"}</td></tr>`;
   }).join("");
 
-  $("tbl-achieve").innerHTML = `<thead><tr>
+  $(tableId).innerHTML = `<thead><tr>
     <th>Relationship manager</th>
     <th class="num">New Channel<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">New Customer<br><span class="th-sub">Planned / Actual</span></th>
@@ -1835,7 +1907,16 @@ function renderAchievement() {
     <th class="num">Follow-up Customer<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Total<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Achievement</th>
-    </tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No one on the team yet.</td></tr>`}</tbody>`;
+    </tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
+}
+
+// The Sheets tab's own Achievement card — now correctly scoped by
+// whichever RM is selected in the page's shared filter, same as every
+// other section on Sheets already was.
+function renderAchievement() {
+  const date = $("achieve-date").value || todayISO();
+  const rmFilter = $("master-rm-filter").value;
+  renderAchievementInto("tbl-achieve", date, rmFilter);
 }
 
 /* ============================ contacts: WM / CP registry ============================ */
