@@ -1700,6 +1700,7 @@ function renderDayView() {
   renderFunnelInto("day-on-funnel", onDay, summarise(onDay), fmtDay(day));
 
   renderAchievementInto("tbl-day-achieve", day, rmFilter);
+  renderTomorrowTarget(day, rmFilter);
 
   /* --- by relationship manager, that day only --- */
   const byRm = new Map();
@@ -1820,12 +1821,34 @@ function exportWorkbook() {
     ]);
   });
 
+  // Observer's download keeps everything aggregate/summary, but drops the
+  // contact-level detail — Employee ID, Phone, Email, Address — that the
+  // full team already sees on screen but Observer doesn't need in a file
+  // they can carry around.
+  let dataOut = data, detailOut = detail;
+  if (isObserver()) {
+    dataOut = stripColumns(data, [3]);           // Data sheet: Employee ID only
+    detailOut = stripColumns(detail, [3, 6, 7, 8]);  // All Meetings: Employee ID, Phone, Email, Address
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(master), "Master");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), "Data");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detail), "All Meetings");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataOut), "Data");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailOut), "All Meetings");
   XLSX.writeFile(wb, `Meeting Ledger ${label}.xlsx`);
   toast("Workbook downloaded");
+}
+
+// Removes the given column indices from a header+rows array-of-arrays,
+// header included — used to trim Observer's export without touching the
+// full version everyone else downloads.
+function stripColumns(aoa, indices) {
+  const sorted = [...indices].sort((a, b) => b - a);   // remove highest index first, so earlier indices stay valid
+  return aoa.map((row) => {
+    const copy = [...row];
+    sorted.forEach((i) => copy.splice(i, 1));
+    return copy;
+  });
 }
 
 // Leads are never in the workbook above — they're a separate, deliberate
@@ -1852,6 +1875,47 @@ function exportLeads() {
 }
 
 /* ============================ admin: plan vs achievement ============================ */
+// Day view's forward-looking companion to Plan vs Achievement: what's
+// been planned for the day AFTER whichever day is selected. Planned only
+// — there's no "actual" to compare against yet, since it hasn't happened.
+function addDaysISO(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+function renderTomorrowTarget(day, rmFilter) {
+  const nextDay = addDaysISO(day, 1);
+  $("day-target-label").textContent = fmtDay(nextDay);
+
+  const plansForDay = state.plans.filter((p) => p.planDate === nextDay && (!rmFilter || p.rmEmail === rmFilter));
+  const plannedByEmail = new Map();
+  plansForDay.forEach((p) => plannedByEmail.set(p.rmEmail, p));
+
+  const people = state.team.filter((u) => {
+    if (rmFilter && u.email !== rmFilter) return false;
+    if (u.role === "observer") return false;
+    if (u.role === "superadmin") return plannedByEmail.has(u.email);
+    return true;
+  });
+
+  const body = people.map((u) => {
+    const p = plannedByEmail.get(u.email) || {};
+    const total = PLAN_FIELDS.reduce((sum, k) => sum + (p[k] || 0), 0);
+    return `<tr><td class="name">${esc(u.name || u.email)}</td>
+      ${n(p.newChannel)}${n(p.newCustomer)}${n(p.fuChannel)}${n(p.fuCustomer)}
+      <td class="num">${total}</td></tr>`;
+  }).join("");
+
+  $("tbl-day-target").innerHTML = `<thead><tr>
+    <th>Relationship manager</th>
+    <th class="num">New Channel</th><th class="num">New Customer</th>
+    <th class="num">Follow-up Channel</th><th class="num">Follow-up Customer</th>
+    <th class="num">Total planned</th>
+    </tr></thead><tbody>${body || `<tr><td colspan="6" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
+}
+
 function renderAchievementInto(tableId, date, rmFilter) {
   const rowsForDate = state.meetings.filter((r) => r.date === date && (!rmFilter || r.rmEmail === rmFilter));
   const plansForDate = state.plans.filter((p) => p.planDate === date && (!rmFilter || p.rmEmail === rmFilter));
