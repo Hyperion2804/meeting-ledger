@@ -57,6 +57,14 @@ const fmtDay = (iso) => {
   return new Date(y, m - 1, d).toLocaleDateString(undefined,
     { weekday: "short", day: "numeric", month: "short" });
 };
+// Display-only. Every date stays stored and compared as YYYY-MM-DD
+// everywhere else in the app — this only reformats what's shown on
+// screen and in exports. Safe on empty/undefined input.
+const fmtDMY = (iso) => {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || "";
+  const [y, m, d] = iso.split("-");
+  return `${d}-${m}-${y}`;
+};
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -1042,7 +1050,7 @@ function renderLog() {
     const rLeads = state.myLeads.filter((l) => l.meetingId === r.id);
     const leads = rLeads.length
       ? `<div class="entry-leads">${rLeads.map((l) =>
-          `<span class="tag tag-flat">${esc(l.leadName)} · ${esc(l.leadPhone)} · ${esc(l.status)}${l.leadDate ? " · " + esc(l.leadDate) : ""}${l.leadDateOriginal ? ` <em class="reschedule-note">(rescheduled from ${esc(l.leadDateOriginal)})</em>` : ""}</span>`).join(" ")}</div>`
+          `<span class="tag tag-flat">${esc(l.leadName)} · ${esc(l.leadPhone)} · ${esc(l.status)}${l.leadDate ? " · " + esc(fmtDMY(l.leadDate)) : ""}${l.leadDateOriginal ? ` <em class="reschedule-note">(rescheduled from ${esc(fmtDMY(l.leadDateOriginal))})</em>` : ""}</span>`).join(" ")}</div>`
       : "";
     html += `<article class="entry">
       <div class="entry-top">
@@ -1287,12 +1295,12 @@ function renderHistory(mine) {
     <th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
     </tr></thead><tbody>${
       rows.length ? rows.map((r) => `<tr>
-        <td class="num">${esc(r.date)}</td><td class="name">${esc(r.prospectName)}</td>
+        <td class="num">${esc(fmtDMY(r.date))}</td><td class="name">${esc(r.prospectName)}</td>
         <td>${esc(r.personType)}</td><td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone || "")}</td><td>${esc(r.email || "")}</td><td class="wrap">${esc(r.address || "")}</td>
         <td>${esc(sourceDetail(r))}</td><td>${resultTag(r.result)}</td>
         <td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
+        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td>
         <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
@@ -1317,9 +1325,9 @@ function exportMyHistory() {
     "Not Interested Reason", "Lead / Docs Shared", "Meeting Done / Logged In",
     "Follow up Date", "Remarks"]];
   rows.forEach((r) => sheet.push([
-    r.date, r.prospectName, r.personType, r.phone || "", r.email || "", r.address || "",
+    fmtDMY(r.date), r.prospectName, r.personType, r.phone || "", r.email || "", r.address || "",
     r.meetingType, r.mode, r.source || "", r.referenceName || "", r.result,
-    r.notInterestedReason || "", r.shared || "", r.progressed || "", r.followUpDate || "", r.remarks || ""
+    r.notInterestedReason || "", r.shared || "", r.progressed || "", fmtDMY(r.followUpDate), r.remarks || ""
   ]));
   if (sheet.length === 1) { toast("Nothing to export in that range."); return; }
 
@@ -1369,9 +1377,9 @@ function renderMyLeads() {
     <th>Lead phone</th><th>Status</th><th>Lead date</th>
     </tr></thead><tbody>${
       rows.length ? rows.map((l) => `<tr>
-        <td class="num">${esc(l.date)}</td><td class="name">${esc(l.prospectName)}</td>
+        <td class="num">${esc(fmtDMY(l.date))}</td><td class="name">${esc(l.prospectName)}</td>
         <td>${esc(l.personType)}</td><td>${esc(l.leadName)}</td><td>${esc(l.leadPhone)}</td>
-        <td>${esc(l.status)}</td><td class="num">${esc(l.leadDate || "")}</td></tr>`).join("")
+        <td>${esc(l.status)}</td><td class="num">${esc(fmtDMY(l.leadDate))}</td></tr>`).join("")
         : `<tr><td colspan="7" class="empty">Nothing in this range.</td></tr>`
     }</tbody>`;
 }
@@ -1384,7 +1392,7 @@ function exportMyLeadsDownload() {
   if (!rows.length) { toast("Nothing to export in that range."); return; }
 
   const sheet = [["Date", "Prospect", "Segment", "Lead Name", "Lead Phone", "Status", "Lead Date"]];
-  rows.forEach((l) => sheet.push([l.date, l.prospectName, l.personType, l.leadName, l.leadPhone, l.status, l.leadDate || ""]));
+  rows.forEach((l) => sheet.push([fmtDMY(l.date), l.prospectName, l.personType, l.leadName, l.leadPhone, l.status, fmtDMY(l.leadDate)]));
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet), "My Leads");
@@ -1649,13 +1657,13 @@ function renderMaster() {
     <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
-        <td class="num">${esc(r.date)}</td><td>${esc(r.rmName || r.rmEmail)}</td>
+        <td class="num">${esc(fmtDMY(r.date))}</td><td>${esc(r.rmName || r.rmEmail)}</td>
         <td class="name">${esc(r.prospectName)}</td><td>${esc(r.personType)}</td>
         <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
+        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
@@ -1671,9 +1679,9 @@ function renderMaster() {
       <th>Lead name</th><th>Lead phone</th><th>Status</th><th>Lead date</th>
       </tr></thead><tbody>${
         leadRows.length ? leadRows.map((l) => `<tr>
-          <td class="num">${esc(l.date)}</td><td>${esc(l.rmName)}</td><td class="name">${esc(l.prospectName)}</td>
+          <td class="num">${esc(fmtDMY(l.date))}</td><td>${esc(l.rmName)}</td><td class="name">${esc(l.prospectName)}</td>
           <td>${esc(l.personType)}</td><td>${esc(l.leadName)}</td><td>${esc(l.leadPhone)}</td>
-          <td>${esc(l.status)}</td><td class="num">${esc(l.leadDate || "")}</td></tr>`).join("")
+          <td>${esc(l.status)}</td><td class="num">${esc(fmtDMY(l.leadDate))}</td></tr>`).join("")
           : `<tr><td colspan="8" class="empty">No leads shared in this range.</td></tr>`
       }</tbody>`;
   }
@@ -1724,7 +1732,7 @@ function renderDayView() {
         leadRows.length ? leadRows.map((l) => `<tr>
           <td>${esc(l.rmName)}</td><td class="name">${esc(l.prospectName)}</td>
           <td>${esc(l.personType)}</td><td>${esc(l.leadName)}</td><td>${esc(l.leadPhone)}</td>
-          <td>${esc(l.status)}</td><td class="num">${esc(l.leadDate || "")}</td></tr>`).join("")
+          <td>${esc(l.status)}</td><td class="num">${esc(fmtDMY(l.leadDate))}</td></tr>`).join("")
           : `<tr><td colspan="7" class="empty">No leads shared on this day.</td></tr>`
       }</tbody>`;
   }
@@ -1744,7 +1752,7 @@ function renderDayView() {
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(r.followUpDate || "")}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(r.followUpDateOriginal)})</span>` : ""}</td>
+        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
         : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
@@ -1791,7 +1799,7 @@ function exportWorkbook() {
   const data = [DATA_HEADERS];
   [...byRmDate.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || a.email.localeCompare(b.email))
-    .forEach((g) => data.push(summaryRow(g.date, rosterLookup(g.email), g.rows)));
+    .forEach((g) => data.push(summaryRow(fmtDMY(g.date), rosterLookup(g.email), g.rows)));
 
   // Master rollup: one row per day in range, roster columns dropped since
   // they don't apply to an all-RM total.
@@ -1801,7 +1809,7 @@ function exportWorkbook() {
   eachDateISO(from, to).forEach((iso) => {
     const drows = rows.filter((r) => r.date === iso);
     if (!drows.length) return;
-    const row = summaryRow(iso, { name: "", designation: "", employeeId: "" }, drows);
+    const row = summaryRow(fmtDMY(iso), { name: "", designation: "", employeeId: "" }, drows);
     master.push(rollupCols.map((i) => row[i]));
   });
   const totalsRow = summaryRow("Total", { name: "", designation: "", employeeId: "" }, rows);
@@ -1814,10 +1822,10 @@ function exportWorkbook() {
   [...rows].sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
     const ru = rosterLookup(r.rmEmail);
     detail.push([
-      r.date, ru.name, ru.designation, ru.employeeId, r.prospectName, r.personType,
+      fmtDMY(r.date), ru.name, ru.designation, ru.employeeId, r.prospectName, r.personType,
       r.phone || "", r.email || "", r.address || "", r.meetingType, r.mode, r.source || "",
       r.referenceName || "", r.result, r.notInterestedReason || "", r.shared || "", r.progressed || "",
-      r.followUpDate || "", r.remarks || ""
+      fmtDMY(r.followUpDate), r.remarks || ""
     ]);
   });
 
@@ -1865,7 +1873,7 @@ function exportLeads() {
 
   const sheet = [["Date", "RM", "Prospect (source of lead)", "Segment", "Lead Name", "Lead Phone", "Status", "Lead Date"]];
   rows.forEach((l) => {
-    sheet.push([l.date, l.rmName, l.prospectName, l.personType, l.leadName, l.leadPhone, l.status, l.leadDate || ""]);
+    sheet.push([fmtDMY(l.date), l.rmName, l.prospectName, l.personType, l.leadName, l.leadPhone, l.status, fmtDMY(l.leadDate)]);
   });
 
   const wb = XLSX.utils.book_new();
