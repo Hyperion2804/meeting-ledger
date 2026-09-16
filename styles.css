@@ -450,3 +450,14 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 
 /* controls sitting under a sub-tab bar, above the first card */
 .sub-controls{margin-bottom:16px}
+
+/* ---------------- bulk import panel ---------------- */
+.import-panel{
+  padding:12px 16px;border-bottom:1px solid var(--rule-soft);background:var(--paper);
+  display:grid;gap:8px;
+}
+.import-panel .lede{font-size:12.5px}
+.import-summary-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--rule-soft)}
+.import-summary-row:last-child{border-bottom:0}
+.import-skip{color:var(--rust)}
+.import-ok{color:var(--green)}
