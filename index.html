@@ -271,7 +271,26 @@
     <section class="card list-head-card">
       <div class="card-head">
         <h2>Your month</h2>
-        <input type="month" id="rm-month" class="month-input" />
+        <div class="page-head-controls">
+          <button type="button" id="btn-import" class="btn btn-ghost btn-sm">Import from Excel</button>
+          <input type="month" id="rm-month" class="month-input" />
+        </div>
+      </div>
+      <input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden />
+      <div id="import-panel" class="import-panel" hidden>
+        <p class="lede">
+          One row per meeting. Columns (any order, case-insensitive):
+          <strong>Date</strong>, <strong>Name</strong>, <strong>Meeting Person Type</strong>,
+          <strong>Phone</strong>, <strong>Email</strong>, <strong>Address</strong>,
+          <strong>Type of Meeting</strong>, <strong>Mode</strong>, <strong>Prospect Source</strong>,
+          <strong>Reference Name</strong>, <strong>Meeting Result</strong>,
+          <strong>Not Interested Reason</strong>, <strong>Lead / Docs Shared</strong>,
+          <strong>Meeting Done / Logged In</strong>, <strong>Follow-up Date</strong>, <strong>Remarks</strong>.
+          Wealth Manager / Channel Partner contact IDs and per-lead sharing detail aren't
+          supported here — those still need adding inside the app afterward.
+        </p>
+        <div id="import-progress" class="lede" hidden></div>
+        <div id="import-summary" hidden></div>
       </div>
       <div id="rm-strip" class="strip"></div>
     </section>
