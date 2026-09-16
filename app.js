@@ -805,6 +805,182 @@ function resetForm() {
 const phoneDigitsOf = (v) => (v || "").replace(/\D/g, "");
 const meetingDocId = (date, phone) => `${date}_${phoneDigitsOf(phone)}`;
 
+/* ============================ bulk import from Excel ============================ */
+$("btn-import").addEventListener("click", () => {
+  $("import-panel").hidden = !$("import-panel").hidden;
+  if (!$("import-panel").hidden) $("import-file").click();
+});
+$("import-file").addEventListener("change", () => {
+  const file = $("import-file").files[0];
+  if (file) runImport(file);
+  $("import-file").value = "";
+});
+
+const HEADER_ALIASES = {
+  date: "date",
+  name: "name",
+  "meeting person type": "persontype", "person type": "persontype",
+  phone: "phone", "contact number": "phone", "contact no": "phone", mobile: "phone",
+  email: "email",
+  address: "address",
+  "type of meeting": "meetingtype",
+  mode: "mode",
+  "prospect source": "source", source: "source",
+  "reference name": "referencename",
+  "meeting result": "result", result: "result",
+  "not interested reason": "notinterestedreason",
+  "lead / docs shared": "shared", "lead/docs shared": "shared", "lead shared": "shared", "docs shared": "shared",
+  "meeting done / logged in": "progressed", "meeting done": "progressed", "logged in": "progressed",
+  "follow-up date": "followupdate", "followup date": "followupdate", "follow up date": "followupdate",
+  remarks: "remarks"
+};
+
+function normalizeFromList(v, list) {
+  const raw = String(v || "").trim();
+  return list.find((x) => x.toLowerCase() === raw.toLowerCase()) || null;
+}
+function normalizeHeader(h) { return HEADER_ALIASES[String(h || "").trim().toLowerCase()] || null; }
+
+function parseFlexibleDate(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  const s = String(v).trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
+  return null;
+}
+
+async function runImport(file) {
+  const progress = $("import-progress"), summary = $("import-summary");
+  summary.hidden = true; summary.innerHTML = "";
+  progress.hidden = false; progress.textContent = "Reading the file…";
+
+  let wb;
+  try {
+    const buf = await file.arrayBuffer();
+    wb = XLSX.read(buf, { type: "array", cellDates: true });
+  } catch (e) {
+    progress.hidden = true;
+    toast("Couldn't read that file. Is it a real Excel/CSV file?");
+    return;
+  }
+
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { defval: "", raw: true });
+  if (!raw.length) { progress.hidden = true; toast("That sheet looks empty."); return; }
+
+  const rows = raw.map((row) => {
+    const out = {};
+    Object.entries(row).forEach(([k, v]) => { const f = normalizeHeader(k); if (f) out[f] = v; });
+    return out;
+  });
+
+  const ok = [];
+  const skipped = [];
+
+  rows.forEach((row, i) => {
+    const rowNum = i + 2;
+    const skip = (reason) => skipped.push({ rowNum, reason });
+
+    const date = parseFlexibleDate(row.date);
+    if (!date) return skip("Missing or unreadable Date");
+    if (date > todayISO()) return skip(`Date (${date}) is in the future`);
+
+    const name = String(row.name || "").trim();
+    if (!name) return skip("Missing Name");
+
+    const personType = normalizeFromList(row.persontype, OPTIONS.personType);
+    if (!personType) return skip(`Unrecognised Meeting Person Type: "${row.persontype || ""}"`);
+
+    const phone = phoneDigitsOf(String(row.phone || ""));
+    if (phone.length !== 10) return skip("Phone must be a valid 10-digit number");
+
+    const email = String(row.email || "").trim();
+    const address = String(row.address || "").trim();
+    if (!address) return skip("Missing Address");
+
+    const meetingType = normalizeFromList(row.meetingtype, OPTIONS.meetingType);
+    if (!meetingType) return skip(`Unrecognised Type of Meeting: "${row.meetingtype || ""}"`);
+
+    const mode = normalizeFromList(row.mode, OPTIONS.mode);
+    if (!mode) return skip(`Unrecognised Mode: "${row.mode || ""}"`);
+
+    const source = normalizeFromList(row.source, OPTIONS.source);
+    if (!source) return skip(`Unrecognised Prospect Source: "${row.source || ""}"`);
+    const referenceName = source === "Reference" ? String(row.referencename || "").trim() : "";
+    if (source === "Reference" && !referenceName) return skip("Source is Reference but Reference Name is blank");
+
+    const result = normalizeFromList(row.result, OPTIONS.result);
+    if (!result) return skip(`Unrecognised Meeting Result: "${row.result || ""}"`);
+
+    const notInterestedReason = result === "Not Interested" ? normalizeFromList(row.notinterestedreason, OPTIONS.notInterestedReason) : "";
+    if (result === "Not Interested" && !notInterestedReason) return skip(`Result is Not Interested but the reason ("${row.notinterestedreason || ""}") doesn't match a known option`);
+
+    const shared = result === "Interested" ? (normalizeFromList(row.shared, OPTIONS.shared) || "") : "";
+    if (result === "Interested" && row.shared && !shared) return skip(`Unrecognised Lead / Docs Shared value: "${row.shared}"`);
+
+    const progressed = shared === "Yes" ? (normalizeFromList(row.progressed, OPTIONS.progressed) || "") : "";
+
+    const followUpDate = parseFlexibleDate(row.followupdate);
+    if (!followUpDate) return skip("Missing or unreadable Follow-up Date");
+
+    const remarks = String(row.remarks || "").trim();
+    if (!remarks) return skip("Missing Remarks");
+
+    ok.push({
+      rowNum, date, prospectName: name, personType, phone, email, address,
+      meetingType, mode, source, referenceName, result, notInterestedReason,
+      shared, progressed, followUpDate, remarks
+    });
+  });
+
+  if (!ok.length) { progress.hidden = true; renderImportSummary(0, skipped); return; }
+
+  let done = 0;
+  for (const r of ok) {
+    progress.textContent = `Importing ${done + 1} of ${ok.length}…`;
+    const id = meetingDocId(r.date, r.phone);
+    try {
+      await setDoc(doc(db, "meetings", id), {
+        date: r.date, prospectName: r.prospectName, personType: r.personType,
+        phone: r.phone, email: r.email, address: r.address,
+        meetingType: r.meetingType, mode: r.mode, source: r.source, referenceName: r.referenceName,
+        contactMode: "", contactId: "",   // not supported by this importer — see panel note
+        result: r.result, notInterestedReason: r.notInterestedReason,
+        shared: r.shared, progressed: r.progressed,
+        sourceOther: "", sourceContactId: "", sourceContactName: "",
+        followUpDate: r.followUpDate, followUpDateOriginal: "",
+        remarks: r.remarks, rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      }, { merge: true });
+      done++;
+    } catch (e) {
+      skipped.push({ rowNum: r.rowNum, reason: "Couldn't save — " + (e.message || "unknown error") });
+    }
+  }
+
+  progress.hidden = true;
+  renderImportSummary(done, skipped);
+  await loadMeetings();
+  renderLog();
+}
+
+function renderImportSummary(okCount, skipped) {
+  const summary = $("import-summary");
+  summary.hidden = false;
+  let html = `<div class="import-summary-row"><strong class="import-ok">${okCount} imported</strong>
+    <span>${skipped.length} skipped</span></div>`;
+  if (skipped.length) {
+    html += skipped.map((s) => `<div class="import-summary-row"><span>Row ${s.rowNum}</span>
+      <span class="import-skip">${esc(s.reason)}</span></div>`).join("");
+  }
+  summary.innerHTML = html;
+  toast(`Imported ${okCount}${skipped.length ? `, ${skipped.length} skipped` : ""}`);
+}
+
 $("meeting-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = $("form-error");
