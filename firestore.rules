@@ -31,6 +31,9 @@ rules_version = '2';
 //    leads    — people a contact has introduced. RM sees own, Team Lead
 //               sees own + reports', Admin and Superadmin see all,
 //               Observer sees NONE.
+//    weeklyPlans — who someone intends to meet, before it happens. Same
+//               visibility as meetings: RM own, Team Lead own + reports',
+//               everyone else (including Observer) sees all.
 // ============================================================
 
 service cloud.firestore {
@@ -234,6 +237,30 @@ service cloud.firestore {
 
       allow update: if isAdminOrAbove()
         || (canLog() && resource.data.rmEmail == callerEmail());
+
+      allow delete: if isAdminOrAbove()
+        || (canLog() && resource.data.rmEmail == callerEmail());
+    }
+
+    // ---------- weeklyPlans: who a person intends to meet, before it happens ----------
+    // A lightweight planning aid, separate from the numeric daily plan in
+    // /plans. Same visibility shape as meetings — RM sees own, Team Lead
+    // sees own + reports, Admin/Superadmin/Observer see everyone's.
+    match /weeklyPlans/{planId} {
+      allow get, list: if canViewAll()
+        || (isMember() && resource.data.rmEmail == callerEmail())
+        || (isTeamLead() && isMyReport(resource.data.rmEmail));
+
+      allow create: if canLog()
+        && request.resource.data.rmEmail == callerEmail()
+        && request.resource.data.date is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.personType is string
+        && request.resource.data.personType.size() > 0;
+
+      allow update: if isAdminOrAbove()
+        || (canLog() && resource.data.rmEmail == callerEmail() && request.resource.data.rmEmail == callerEmail());
 
       allow delete: if isAdminOrAbove()
         || (canLog() && resource.data.rmEmail == callerEmail());
