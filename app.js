@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], reportEmails: [], page: null, editingId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -301,6 +301,7 @@ async function loadAll() {
     loadPlans(),
     loadContacts(),
     loadLeads(),
+    loadWeeklyPlans(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
 }
@@ -336,6 +337,17 @@ async function loadMeetings() {
   state.meetings = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .sort((x, y) => (y.date || "").localeCompare(x.date || ""));
+}
+
+async function loadWeeklyPlans() {
+  const col = collection(db, "weeklyPlans");
+  const q = canViewAll() ? col
+    : isTeamLead() ? query(col, where("rmEmail", "in", scopeEmails()))
+    : query(col, where("rmEmail", "==", state.user.email));
+  const snap = await getDocs(q);
+  state.weeklyPlans = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((x, y) => (x.date || "").localeCompare(y.date || ""));
 }
 
 async function loadPlans() {
@@ -1314,6 +1326,157 @@ function startEdit(id) {
 }
 
 
+/* ============================ weekly plan: who, where, why ============================ */
+fillSelect($("wp-personType"), OPTIONS.personType, { blank: true });
+$("wp-date").value = todayISO();
+$("weeklyplan-month").value = thisMonth();
+
+const WP_STATUS = { PLANNED: "Planned", DONE: "Done" };
+
+$("weeklyplan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("weeklyplan-error");
+  err.hidden = true;
+
+  const date = $("wp-date").value;
+  const name = $("wp-name").value.trim();
+  const personType = $("wp-personType").value;
+  const phone = phoneDigitsOf($("wp-phone").value);
+  const location = $("wp-location").value.trim();
+  const purpose = $("wp-purpose").value.trim();
+
+  if (!date) { err.textContent = "Pick a date."; err.hidden = false; return; }
+  if (!name) { err.textContent = "Add a name."; err.hidden = false; return; }
+  if (!personType) { err.textContent = "Pick a meeting person type."; err.hidden = false; return; }
+  if (!location) { err.textContent = "Add a location."; err.hidden = false; return; }
+  if ($("wp-phone").value && phone.length !== 10) { err.textContent = "Enter a valid 10-digit phone number, or leave it blank."; err.hidden = false; return; }
+
+  try {
+    await addDoc(collection(db, "weeklyPlans"), {
+      date, name, personType, phone, location, purpose,
+      status: WP_STATUS.PLANNED,
+      rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+      rmEmployeeId: state.profile.employeeId || "",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    toast("Added to your plan");
+    $("weeklyplan-form").reset();
+    $("wp-date").value = todayISO();
+    await loadWeeklyPlans();
+    renderWeeklyPlan();
+  } catch (e2) {
+    err.textContent = "Couldn't save that. " + (e2.message || "");
+    err.hidden = false;
+  }
+});
+$("weeklyplan-month").addEventListener("change", renderWeeklyPlan);
+
+function renderWeeklyPlan() {
+  const m = $("weeklyplan-month").value || thisMonth();
+  const mine = state.weeklyPlans.filter((p) => p.rmEmail === state.user.email && (p.date || "").startsWith(m))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  if (!mine.length) {
+    $("weeklyplan-list").innerHTML = `<p class="empty">Nothing planned this month yet. Add one on the left.</p>`;
+    return;
+  }
+  $("weeklyplan-list").innerHTML = mine.map((p) => `
+    <article class="entry">
+      <div class="entry-top">
+        <span class="entry-name">${esc(p.name)}</span>
+        <span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span>
+        <span class="entry-actions">
+          ${p.status !== WP_STATUS.DONE ? `<button class="btn-link" data-promote="${p.id}">Log this meeting</button>` : ""}
+          <button class="btn-link" data-wp-toggle="${p.id}">${p.status === WP_STATUS.DONE ? "Mark planned" : "Mark done"}</button>
+          <button class="btn-link danger" data-wp-delete="${p.id}">Remove</button>
+        </span>
+      </div>
+      <div class="entry-meta">${esc(fmtDMY(p.date))} · ${esc(p.personType)}${p.phone ? " · " + esc(p.phone) : ""} · ${esc(p.location)}</div>
+      ${p.purpose ? `<div class="entry-remarks">${esc(p.purpose)}</div>` : ""}
+    </article>`).join("");
+
+  $("weeklyplan-list").querySelectorAll("[data-promote]").forEach((b) =>
+    b.addEventListener("click", () => promoteToMeeting(b.dataset.promote)));
+  $("weeklyplan-list").querySelectorAll("[data-wp-toggle]").forEach((b) =>
+    b.addEventListener("click", () => toggleWeeklyPlanStatus(b.dataset.wpToggle)));
+  $("weeklyplan-list").querySelectorAll("[data-wp-delete]").forEach((b) =>
+    b.addEventListener("click", () => deleteWeeklyPlan(b.dataset.wpDelete)));
+}
+
+async function toggleWeeklyPlanStatus(id) {
+  const p = state.weeklyPlans.find((x) => x.id === id);
+  if (!p) return;
+  const next = p.status === WP_STATUS.DONE ? WP_STATUS.PLANNED : WP_STATUS.DONE;
+  try {
+    await updateDoc(doc(db, "weeklyPlans", id), { status: next, updatedAt: serverTimestamp() });
+    p.status = next;
+    renderWeeklyPlan();
+  } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
+}
+
+async function deleteWeeklyPlan(id) {
+  const p = state.weeklyPlans.find((x) => x.id === id);
+  if (!p) return;
+  if (!confirm(`Remove ${p.name} from your plan?`)) return;
+  try {
+    await deleteDoc(doc(db, "weeklyPlans", id));
+    state.weeklyPlans = state.weeklyPlans.filter((x) => x.id !== id);
+    renderWeeklyPlan();
+  } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
+}
+
+// Pre-fills the real meeting form from a plan entry, switches to the Log
+// sub-tab so the RM lands on a form ready to finish and save. Marks the
+// plan Done immediately — once you're logging it for real, it's served
+// its purpose as a plan.
+async function promoteToMeeting(id) {
+  const p = state.weeklyPlans.find((x) => x.id === id);
+  if (!p) return;
+  resetForm();
+  $("f-date").value = p.date > todayISO() ? todayISO() : p.date;
+  $("f-prospectName").value = p.name;
+  $("f-personType").value = p.personType;
+  if (p.phone) $("f-phone").value = p.phone;
+  $("f-address").value = p.location;
+  syncLabels();
+  toggleContactMode();
+
+  try {
+    await updateDoc(doc(db, "weeklyPlans", id), { status: WP_STATUS.DONE, updatedAt: serverTimestamp() });
+    p.status = WP_STATUS.DONE;
+  } catch (e) { /* the meeting form still opens even if this quietly fails */ }
+
+  document.querySelector('#log-subtabs [data-sub="log"]').click();
+  toast(`Logging the meeting with ${p.name} — fill in the rest and save`);
+}
+
+// The wide view — Team Lead/Admin/Superadmin/Observer, everyone else's
+// plans (already scoped correctly by loadWeeklyPlans per role).
+function renderMasterWeeklyPlan() {
+  const m = $("master-weeklyplan-month").value || thisMonth();
+  const rows = state.weeklyPlans.filter((p) => (p.date || "").startsWith(m))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  const label = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1)
+    .toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  $("master-weeklyplan-label").textContent = label;
+  $("master-weeklyplan-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
+
+  $("tbl-master-weeklyplan").innerHTML = `<thead><tr>
+    <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Phone</th><th>Location</th><th>Purpose</th><th>Status</th>
+    </tr></thead><tbody>${
+      rows.length ? rows.map((p) => `<tr>
+        <td class="num">${esc(fmtDMY(p.date))}</td><td>${esc(p.rmName || p.rmEmail)}</td>
+        <td class="name">${esc(p.name)}</td><td>${esc(p.personType)}</td>
+        <td>${esc(p.phone || "—")}</td><td class="wrap">${esc(p.location)}</td>
+        <td class="wrap">${esc(p.purpose || "")}</td>
+        <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>`).join("")
+        : `<tr><td colspan="8" class="empty">Nothing planned this month.</td></tr>`
+    }</tbody>`;
+}
+$("master-weeklyplan-month").value = thisMonth();
+$("master-weeklyplan-month").addEventListener("change", renderMasterWeeklyPlan);
+
 /* ============================ RM: tomorrow's plan ============================ */
 const tomorrowISO = () => {
   const d = new Date(); d.setDate(d.getDate() + 1);
@@ -1427,6 +1590,8 @@ $("log-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("log-panel-log").hidden = logSub !== "log";
     $("log-panel-history").hidden = logSub !== "history";
     $("log-panel-leads").hidden = logSub !== "leads";
+    $("log-panel-weeklyplan").hidden = logSub !== "weeklyplan";
+    if (logSub === "weeklyplan") renderWeeklyPlan();
   }));
 
 $("history-month").value = thisMonth();
@@ -1485,7 +1650,7 @@ function renderHistory(mine) {
   $("tbl-history").querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", () => {
       startEdit(b.dataset.edit);
-      $('.subtab[data-sub="log"]').click();
+      document.querySelector('#log-subtabs [data-sub="log"]').click();
     }));
 }
 
@@ -1629,7 +1794,9 @@ $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("master-panel-dashboard").hidden = masterSub !== "dashboard";
     $("master-panel-sheets").hidden = masterSub !== "sheets";
     $("master-panel-day").hidden = masterSub !== "day";
+    $("master-panel-weeklyplan").hidden = masterSub !== "weeklyplan";
     if (masterSub === "day") renderDayView();
+    if (masterSub === "weeklyplan") renderMasterWeeklyPlan();
   }));
 
 $("day-view-date").value = todayISO();
