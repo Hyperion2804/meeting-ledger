@@ -1,0 +1,9 @@
+{
+  "name": "meeting-ledger-reminders",
+  "private": true,
+  "description": "Daily Weekly Plan digest emails — run via GitHub Actions, not part of the deployed app itself.",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "nodemailer": "^6.9.15"
+  }
+}
