@@ -90,6 +90,7 @@
       <button class="subtab" data-sub="log" role="tab" aria-selected="true">Log</button>
       <button class="subtab" data-sub="history" role="tab" aria-selected="false">My history</button>
       <button class="subtab" data-sub="leads" role="tab" aria-selected="false">Leads</button>
+      <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
     </nav>
 
     <div id="log-panel-log" class="page-split">
@@ -347,6 +348,55 @@
         <div class="scroller"><table id="tbl-myleads" class="grid"></table></div>
       </section>
     </div>
+
+    <div id="log-panel-weeklyplan" hidden>
+      <div class="page-split">
+        <section class="card form-card">
+          <div class="card-head">
+            <h2>Plan a meeting</h2>
+            <span class="card-note">Who, where, and why — before it happens</span>
+          </div>
+          <form id="weeklyplan-form" class="form" novalidate>
+            <label class="field">
+              <span>Date</span>
+              <input type="date" id="wp-date" required />
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <input type="text" id="wp-name" placeholder="Who are you planning to meet?" autocomplete="off" required />
+            </label>
+            <div class="row row-2">
+              <label class="field">
+                <span>Meeting person type</span>
+                <select id="wp-personType" required></select>
+              </label>
+              <label class="field">
+                <span>Phone <em>optional</em></span>
+                <input type="tel" id="wp-phone" placeholder="10-digit mobile" autocomplete="off" maxlength="10" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Location</span>
+              <input type="text" id="wp-location" placeholder="Where's this happening?" autocomplete="off" required />
+            </label>
+            <label class="field">
+              <span>Purpose / notes <em>optional</em></span>
+              <textarea id="wp-purpose" rows="3" placeholder="What's this meeting about?"></textarea>
+            </label>
+            <p id="weeklyplan-error" class="form-error" hidden></p>
+            <button type="submit" class="btn btn-primary">Add to plan</button>
+          </form>
+        </section>
+
+        <section class="card list-card">
+          <div class="card-head">
+            <h2>Your plan</h2>
+            <input type="month" id="weeklyplan-month" class="month-input" />
+          </div>
+          <div id="weeklyplan-list" class="list"></div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <!-- ---------------- ADMIN: MASTER ---------------- -->
@@ -373,6 +423,7 @@
       <button class="subtab" data-sub="dashboard" role="tab" aria-selected="true">Dashboard</button>
       <button class="subtab" data-sub="sheets" role="tab" aria-selected="false">Sheets</button>
       <button class="subtab" data-sub="day" role="tab" aria-selected="false">Day view</button>
+      <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
     </nav>
 
     <div id="master-panel-dashboard">
@@ -490,6 +541,20 @@
           <span class="card-note" id="day-all-count"></span>
         </div>
         <div class="scroller"><table id="tbl-day-all" class="grid"></table></div>
+      </section>
+    </div>
+
+    <div id="master-panel-weeklyplan" hidden>
+      <div class="page-head-controls sub-controls">
+        <input type="month" id="master-weeklyplan-month" class="month-input" />
+        <span class="lede" id="master-weeklyplan-label"></span>
+      </div>
+      <section class="card">
+        <div class="card-head">
+          <h2>Everyone's weekly plan</h2>
+          <span class="card-note" id="master-weeklyplan-count"></span>
+        </div>
+        <div class="scroller"><table id="tbl-master-weeklyplan" class="grid"></table></div>
       </section>
     </div>
   </main>
