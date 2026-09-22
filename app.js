@@ -1780,9 +1780,6 @@ $("export-to").addEventListener("change", renderMaster);
 
 $("btn-export").addEventListener("click", exportWorkbook);
 $("btn-export-leads").addEventListener("click", exportLeads);
-$("achieve-date").value = todayISO();
-$("achieve-date").max = todayISO();
-$("achieve-date").addEventListener("change", renderMaster);
 
 /* master sub-tabs: Dashboard (charts) vs Sheets (funnel/tables/export data) vs Day view (single-day drilldown) */
 let masterSub = "dashboard";
@@ -2267,10 +2264,11 @@ function renderTomorrowTarget(day, rmFilter) {
     </tr></thead><tbody>${body || `<tr><td colspan="6" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
 }
 
-function renderAchievementInto(tableId, date, rmFilter) {
-  const rowsForDate = state.meetings.filter((r) => r.date === date && (!rmFilter || r.rmEmail === rmFilter));
-  const plansForDate = state.plans.filter((p) => p.planDate === date && (!rmFilter || p.rmEmail === rmFilter));
-
+// Shared by both callers below — takes already-filtered rows/plans and
+// builds the table. Plans are summed per RM, not just kept as the latest
+// one: a single day only ever matches one plan doc anyway, but a month
+// or custom range can match many, and every one of them needs to count.
+function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter) {
   // "Channel" = Wealth Manager / Channel Partner. "Customer" = Investor.
   // "New" = First meeting. "Follow-up" = Follow-up meeting. Same four
   // buckets the RM planned against, so Planned and Actual are apples to apples.
@@ -2282,15 +2280,20 @@ function renderAchievementInto(tableId, date, rmFilter) {
   };
 
   const actualByEmail = new Map();
-  rowsForDate.forEach((r) => {
+  rowsInRange.forEach((r) => {
     const email = r.rmEmail;
     if (!actualByEmail.has(email)) actualByEmail.set(email, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0, total: 0 });
     const bucket = actualByEmail.get(email);
     bucket[bucketOf(r)]++;
     bucket.total++;
   });
+
   const plannedByEmail = new Map();
-  plansForDate.forEach((p) => plannedByEmail.set(p.rmEmail, p));
+  plansInRange.forEach((p) => {
+    if (!plannedByEmail.has(p.rmEmail)) plannedByEmail.set(p.rmEmail, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0 });
+    const bucket = plannedByEmail.get(p.rmEmail);
+    PLAN_FIELDS.forEach((k) => { bucket[k] += (p[k] || 0); });
+  });
 
   const people = state.team.filter((u) => {
     if (rmFilter && u.email !== rmFilter) return false;      // scoped to whichever RM is selected, if any
@@ -2325,13 +2328,29 @@ function renderAchievementInto(tableId, date, rmFilter) {
     </tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
 }
 
-// The Sheets tab's own Achievement card — now correctly scoped by
-// whichever RM is selected in the page's shared filter, same as every
-// other section on Sheets already was.
+// Day view's single-day Achievement — unchanged in behaviour.
+function renderAchievementInto(tableId, date, rmFilter) {
+  const rowsForDate = state.meetings.filter((r) => r.date === date && (!rmFilter || r.rmEmail === rmFilter));
+  const plansForDate = state.plans.filter((p) => p.planDate === date && (!rmFilter || p.rmEmail === rmFilter));
+  renderAchievementFromRows(tableId, rowsForDate, plansForDate, rmFilter);
+}
+
+// Sheets' Achievement — summed across whichever month or custom range is
+// currently selected at the top of the page, same range everything else
+// on Sheets already uses.
+function renderAchievementRangeInto(tableId, from, to, rmFilter) {
+  const rowsInRange = state.meetings.filter((r) => r.date >= from && r.date <= to && (!rmFilter || r.rmEmail === rmFilter));
+  const plansInRange = state.plans.filter((p) => p.planDate >= from && p.planDate <= to && (!rmFilter || p.rmEmail === rmFilter));
+  renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter);
+}
+
+// The Sheets tab's own Achievement card — now summed over the shared
+// month/custom-range picker, exactly like the rest of Sheets, instead of
+// its own separate single-day picker.
 function renderAchievement() {
-  const date = $("achieve-date").value || todayISO();
+  const { from, to } = exportRange();
   const rmFilter = $("master-rm-filter").value;
-  renderAchievementInto("tbl-achieve", date, rmFilter);
+  renderAchievementRangeInto("tbl-achieve", from, to, rmFilter);
 }
 
 /* ============================ contacts: WM / CP registry ============================ */
