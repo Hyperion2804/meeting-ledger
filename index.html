@@ -482,7 +482,15 @@
       <section class="card">
         <div class="card-head">
           <h2>Every meeting</h2>
-          <span class="card-note" id="all-count"></span>
+          <div class="page-head-controls">
+            <select id="all-type-filter" class="month-input">
+              <option value="all">All types</option>
+              <option value="Wealth Manager">Wealth Manager</option>
+              <option value="Channel Partner">Channel Partner</option>
+              <option value="Investor">Investor</option>
+            </select>
+            <span class="card-note" id="all-count"></span>
+          </div>
         </div>
         <div class="scroller"><table id="tbl-all" class="grid"></table></div>
       </section>
@@ -537,7 +545,15 @@
       <section class="card">
         <div class="card-head">
           <h2>Every meeting</h2>
-          <span class="card-note" id="day-all-count"></span>
+          <div class="page-head-controls">
+            <select id="day-type-filter" class="month-input">
+              <option value="all">All types</option>
+              <option value="Wealth Manager">Wealth Manager</option>
+              <option value="Channel Partner">Channel Partner</option>
+              <option value="Investor">Investor</option>
+            </select>
+            <span class="card-note" id="day-all-count"></span>
+          </div>
         </div>
         <div class="scroller"><table id="tbl-day-all" class="grid"></table></div>
       </section>
@@ -673,6 +689,16 @@
 </div>
 
 <div id="toast" class="toast" hidden></div>
+
+<div id="history-modal" class="modal-overlay" hidden>
+  <div class="modal-panel">
+    <div class="card-head">
+      <h2>Contact history — <span id="history-modal-name"></span></h2>
+      <button type="button" id="btn-history-close" class="btn-link">Close</button>
+    </div>
+    <div id="history-modal-body" class="history-thread"></div>
+  </div>
+</div>
 
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
