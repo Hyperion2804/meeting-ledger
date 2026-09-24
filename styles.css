@@ -461,3 +461,18 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 .import-summary-row:last-child{border-bottom:0}
 .import-skip{color:var(--rust)}
 .import-ok{color:var(--green)}
+
+/* ---------------- contact history modal ---------------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(28,20,10,.45);z-index:80;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.modal-panel{
+  background:#fff;border-radius:14px;max-width:680px;width:100%;
+  max-height:82vh;overflow-y:auto;box-shadow:0 24px 64px -20px rgba(28,20,10,.5);
+}
+.history-thread{padding:8px 20px 20px;display:grid;gap:14px}
+.history-entry{border:1px solid var(--rule);border-radius:10px;padding:12px 14px;background:var(--paper)}
+.history-entry-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.history-entry-date{font-family:var(--f-data);font-size:12.5px;color:var(--ink-3)}
+.history-entry-remarks{font-size:13px;color:var(--ink);margin-top:6px;line-height:1.5}
