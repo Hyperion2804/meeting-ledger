@@ -93,6 +93,32 @@ const n = (v) => (v ? `<td class="num">${v}</td>` : `<td class="num zero">0</td>
 
 // Source column, with the actual detail alongside the bare category —
 // "Reference — Rohan Shah" instead of just "Reference".
+// Contact history — every meeting logged against one phone number, in
+// order, First and Follow-up together with their own remarks. Pulls from
+// state.meetings exactly as already scoped for whoever's looking (an RM's
+// own history stays their own; Admin/Superadmin/Observer see every RM's
+// visits with that person) — no separate access check needed here.
+function showContactHistory(phone) {
+  const rows = state.meetings.filter((r) => r.phone === phone)
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  if (!rows.length) return;
+
+  $("history-modal-name").textContent = `${rows[0].prospectName || "Unnamed"} · ${phone}`;
+  $("history-modal-body").innerHTML = rows.map((r) => `
+    <article class="history-entry">
+      <div class="history-entry-top">
+        <span class="history-entry-date">${esc(fmtDMY(r.date))}</span>
+        <span class="tag tag-flat">${esc(r.meetingType)}</span>
+        ${resultTag(r.result)}
+        <span class="tag tag-flat">${esc(r.rmName || r.rmEmail)}</span>
+      </div>
+      ${r.remarks ? `<div class="history-entry-remarks">${esc(r.remarks)}</div>` : `<div class="history-entry-remarks" style="color:var(--ink-3)">No remarks recorded.</div>`}
+    </article>`).join("");
+  $("history-modal").hidden = false;
+}
+$("btn-history-close").addEventListener("click", () => { $("history-modal").hidden = true; });
+$("history-modal").addEventListener("click", (e) => { if (e.target.id === "history-modal") $("history-modal").hidden = true; });
+
 function sourceDetail(r) {
   if (!r.source) return "—";
   if (r.source === "Reference" && r.referenceName) return `Reference — ${r.referenceName}`;
@@ -1643,10 +1669,12 @@ function renderHistory(mine) {
         <td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td>
-        <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
+        <td><button class="btn-link" data-edit="${r.id}">Edit</button> · <button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
     }</tbody>`;
 
+  $("tbl-history").querySelectorAll("[data-history]").forEach((b) =>
+    b.addEventListener("click", () => showContactHistory(b.dataset.history)));
   $("tbl-history").querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", () => {
       startEdit(b.dataset.edit);
@@ -1748,6 +1776,7 @@ $("admin-month").max = thisMonth();
 $("export-from").max = todayISO();
 $("export-to").max = todayISO();
 $("master-rm-filter").addEventListener("change", renderMaster);
+$("all-type-filter").addEventListener("change", renderMaster);
 
 function populateMasterRmFilter() {
   const sel = $("master-rm-filter");
@@ -1799,6 +1828,7 @@ $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
 $("day-view-date").value = todayISO();
 $("day-view-date").max = todayISO();
 $("day-view-date").addEventListener("change", renderDayView);
+$("day-type-filter").addEventListener("change", renderDayView);
 // The same "All RMs" filter used on Dashboard/Sheets applies here too —
 // one shared control, not a second one to keep in sync.
 $("master-rm-filter").addEventListener("change", () => { if (masterSub === "day") renderDayView(); });
@@ -1989,12 +2019,14 @@ function renderMaster() {
   renderSegmentTables("daily-segment-tables", "Date", dayRowDefs, "Total");
 
   /* --- every meeting --- */
-  $("all-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
-  const sorted = [...rows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const typeFilter = $("all-type-filter").value;
+  const allRows = typeFilter === "all" ? rows : rows.filter((r) => r.personType === typeFilter);
+  $("all-count").textContent = `${allRows.length} row${allRows.length === 1 ? "" : "s"}`;
+  const sorted = [...allRows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td class="num">${esc(fmtDMY(r.date))}</td><td>${esc(r.rmName || r.rmEmail)}</td>
@@ -2004,9 +2036,12 @@ function renderMaster() {
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
-        : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
+        <td class="wrap">${esc(r.remarks || "")}</td>
+        <td><button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
+        : `<tr><td colspan="15" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
+  $("tbl-all").querySelectorAll("[data-history]").forEach((b) =>
+    b.addEventListener("click", () => showContactHistory(b.dataset.history)));
 
   /* --- leads shared with the team (Admin/Superadmin see all, Team Lead sees their own reports', never Observer) --- */
   $("leads-card").hidden = !canSeeTeamLeads();
@@ -2078,12 +2113,14 @@ function renderDayView() {
   }
 
   /* --- every meeting, that day only --- */
-  const sorted = [...onDay].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
+  const dayTypeFilter = $("day-type-filter").value;
+  const dayAllRows = dayTypeFilter === "all" ? onDay : onDay.filter((r) => r.personType === dayTypeFilter);
+  const sorted = [...dayAllRows].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
   $("day-all-count").textContent = `${sorted.length} row${sorted.length === 1 ? "" : "s"}`;
   $("tbl-day-all").innerHTML = `<thead><tr>
     <th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td>${esc(r.rmName || r.rmEmail)}</td>
@@ -2093,9 +2130,12 @@ function renderDayView() {
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
-        : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
+        <td class="wrap">${esc(r.remarks || "")}</td>
+        <td><button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
+        : `<tr><td colspan="14" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
+  $("tbl-day-all").querySelectorAll("[data-history]").forEach((b) =>
+    b.addEventListener("click", () => showContactHistory(b.dataset.history)));
 }
 
 /* ============================ export ============================ */
