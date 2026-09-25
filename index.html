@@ -8,6 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script>
+  try {
+    var t = localStorage.getItem("theme");
+    if (t === "dark") document.documentElement.setAttribute("data-theme", "dark");
+  } catch (e) {}
+</script>
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -65,6 +71,7 @@
     <div class="who">
       <span id="who-name" class="who-name"></span>
       <span id="who-role" class="chip"></span>
+      <button id="btn-theme" class="btn-link theme-toggle" type="button" title="Switch to dark" aria-label="Switch to dark theme">☀</button>
       <button id="btn-signout" class="btn btn-ghost btn-sm">Sign out</button>
     </div>
   </header>
@@ -407,16 +414,22 @@
         <p class="lede" id="master-sub">All relationship managers, combined.</p>
       </div>
       <div class="page-head-controls">
-        <select id="master-rm-filter" class="month-input">
-          <option value="">All RMs</option>
-        </select>
-        <input type="month" id="admin-month" class="month-input" />
-        <span class="range-sep">or</span>
-        <input type="date" id="export-from" class="month-input" title="Custom range: from" />
-        <input type="date" id="export-to" class="month-input" title="Custom range: to" />
+        <button type="button" id="btn-filters-toggle" class="btn btn-ghost btn-sm">
+          Filters <span id="filters-summary-chip" class="filters-chip"></span>
+        </button>
         <button id="btn-export" class="btn btn-primary btn-sm">Download Excel</button>
         <button id="btn-export-leads" class="btn btn-ghost btn-sm">Download leads</button>
       </div>
+    </div>
+
+    <div id="master-filters-panel" class="filters-panel" hidden>
+      <select id="master-rm-filter" class="month-input">
+        <option value="">All RMs</option>
+      </select>
+      <input type="month" id="admin-month" class="month-input" />
+      <span class="range-sep">or</span>
+      <input type="date" id="export-from" class="month-input" title="Custom range: from" />
+      <input type="date" id="export-to" class="month-input" title="Custom range: to" />
     </div>
 
     <nav class="subtabs" id="master-subtabs" role="tablist">
@@ -450,6 +463,11 @@
     </div>
 
     <div id="master-panel-sheets" hidden>
+      <div id="insight-banner" class="insight-banner" hidden>
+        <span class="insight-banner-text" id="insight-banner-text"></span>
+        <span class="insight-banner-delta" id="insight-banner-delta"></span>
+      </div>
+
       <section class="funnel" aria-label="Conversion funnel">
         <div id="funnel-bands" class="funnel-bands"></div>
       </section>
