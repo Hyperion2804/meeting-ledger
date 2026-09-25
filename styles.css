@@ -15,6 +15,13 @@
   --paper:#FBF8F2;
   --paper-2:#FFFFFF;
 
+  /* Permanently dark brand chrome (topbar, sign-in aside, toast) —
+     deliberately NOT --ink. --ink is a text color and correctly flips
+     light/dark with the theme; this stays the same fixed dark surface
+     in both themes, same as a logo never changes color with the page
+     around it. */
+  --brand-dark:#1C140A;
+
   /* brand — extracted from the Hyperion logo's metallic gradient */
   --gold-deep:#7A4A12;
   --gold-mid:#8A5518;    /* darker than --gold — safe for white text, used in gradients/solid fills that carry text */
@@ -30,6 +37,17 @@
   --rust:#8F3A2C;
   --rust-wash:#F8EBE8;
 
+  /* decorative only — verified from the real investor deck. Never used
+     for status; rust alone carries that meaning, everywhere, always. */
+  --terracotta:#CB513B;
+
+  /* the deck's real primary blue, read directly from its slide XML
+     (srgbClr, 27 uses across headline/stat text). Used sparingly — one
+     emphasis moment, not a repaint. White text carries fine on this fill
+     in both themes, so — like gold-deep/gold-mid — it doesn't need a
+     separate dark-mode value. */
+  --deck-navy:#1F497D;
+
   --f-display:"Newsreader",Georgia,serif;
   --f-ui:"Public Sans",system-ui,-apple-system,sans-serif;
   --f-data:"IBM Plex Mono",ui-monospace,Menlo,monospace;
@@ -37,6 +55,37 @@
   --sp:8px;
   --r:10px;
   --shadow:0 1px 2px rgba(28,20,10,.06),0 8px 24px -16px rgba(28,20,10,.30);
+}
+
+/* ============================================================
+   Dark theme — toggled via [data-theme="dark"] on <html>, not just an
+   inversion. Button fills (gold-deep/gold-mid) stay the same in both
+   themes: they carry white text regardless of page background, so their
+   contrast is already theme-independent. Everything else — text on page,
+   borders, and every status wash — is re-picked for real dark-background
+   contrast, not flipped.
+   ============================================================ */
+:root[data-theme="dark"]{
+  --ink:#F3ECE1;
+  --ink-2:#E4D9C8;
+  --ink-3:#A89878;
+  --rule:#3D3222;
+  --rule-soft:#2E2519;
+  --paper:#17120C;
+  --paper-2:#211A11;
+
+  --gold:#D4A94F;          /* brightened — the light-mode value reads too muted on a dark surface */
+  --gold-2:#E3BD70;
+  --gold-wash:#3A2C15;
+
+  --green:#5FB39A;
+  --green-wash:#16332A;
+  --amber:#D9A648;
+  --amber-wash:#3D2E10;
+  --rust:#D9705C;
+  --rust-wash:#3D1F19;
+
+  --shadow:0 1px 2px rgba(0,0,0,.30),0 8px 24px -16px rgba(0,0,0,.55);
 }
 
 *{box-sizing:border-box}
@@ -64,7 +113,7 @@ em{font-style:normal;color:var(--ink-3);font-weight:400}
   gap:14px;background:var(--paper);z-index:60;color:var(--ink-3);font-size:13px;
 }
 .boot-mark{
-  width:38px;height:38px;border-radius:9px;background:var(--ink);color:var(--paper);
+  width:38px;height:38px;border-radius:9px;background:var(--brand-dark);color:var(--paper);
   display:grid;place-items:center;font-family:var(--f-data);font-size:13px;font-weight:600;
   animation:pulse 1.4s ease-in-out infinite;
 }
@@ -91,7 +140,7 @@ em{font-style:normal;color:var(--ink-3);font-weight:400}
   border:1px solid #E9CFC9;border-radius:var(--r);padding:10px 12px;
 }
 .signin-foot{font-size:12.5px;color:var(--ink-3);margin-top:4px}
-.signin-aside{background:var(--ink);display:grid;place-items:center;padding:40px}
+.signin-aside{background:var(--brand-dark);display:grid;place-items:center;padding:40px}
 .funnel-demo{width:min(100%,360px);display:grid;gap:10px}
 .fd-band{
   width:var(--w);min-width:180px;background:linear-gradient(90deg,var(--gold-mid),var(--gold-deep));
@@ -108,7 +157,7 @@ em{font-style:normal;color:var(--ink-3);font-weight:400}
 
 /* ---------------- topbar ---------------- */
 .topbar{
-  position:sticky;top:0;z-index:30;background:var(--ink);color:#fff;
+  position:sticky;top:0;z-index:30;background:var(--brand-dark);color:#fff;
   display:flex;align-items:center;gap:20px;padding:10px clamp(14px,3vw,28px);
 }
 .topbar .brand-name{color:#fff}
@@ -121,6 +170,12 @@ em{font-style:normal;color:var(--ink-3);font-weight:400}
 .tab[aria-selected="true"]{color:var(--ink);background:var(--paper)}
 .who{display:flex;align-items:center;gap:10px}
 .who-name{font-size:13px;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.theme-toggle{
+  background:none;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.85);
+  font-size:14px;line-height:1;width:30px;height:30px;border-radius:7px;
+  cursor:pointer;display:grid;place-items:center;flex-shrink:0;
+}
+.theme-toggle:hover{background:rgba(255,255,255,.1);color:#fff}
 .chip{
   font-family:var(--f-data);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.13);color:#fff;white-space:nowrap;
@@ -204,7 +259,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 
 /* ---------------- the funnel (signature) ---------------- */
 .funnel{
-  background:var(--ink);border-radius:var(--r);padding:22px clamp(16px,3vw,28px);
+  background:var(--brand-dark);border-radius:var(--r);padding:22px clamp(16px,3vw,28px);
   margin-bottom:20px;box-shadow:var(--shadow);
 }
 .funnel-bands{display:grid;gap:9px}
@@ -282,11 +337,15 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .entry-remarks{font-size:13px;color:var(--ink-3);line-height:1.45}
 .entry-actions{display:flex;gap:2px;margin-left:auto}
 .empty{padding:34px 16px;text-align:center;color:var(--ink-3);font-size:13.5px}
+.empty::before{
+  content:"";display:block;width:34px;height:34px;margin:0 auto 10px;
+  border-radius:50%;border:1.5px dashed var(--terracotta);opacity:.55;
+}
 
 /* ---------------- toast ---------------- */
 .toast{
   position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;
-  background:var(--ink);color:#fff;font-size:13.5px;font-weight:500;
+  background:var(--brand-dark);color:#fff;font-size:13.5px;font-weight:500;
   padding:11px 18px;border-radius:9px;box-shadow:0 10px 30px -10px rgba(0,0,0,.45);
   animation:rise .22s ease backwards;max-width:90vw;text-align:center;
 }
@@ -468,7 +527,7 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
   display:flex;align-items:center;justify-content:center;padding:20px;
 }
 .modal-panel{
-  background:#fff;border-radius:14px;max-width:680px;width:100%;
+  background:var(--paper-2);border-radius:14px;max-width:680px;width:100%;
   max-height:82vh;overflow-y:auto;box-shadow:0 24px 64px -20px rgba(28,20,10,.5);
 }
 .history-thread{padding:8px 20px 20px;display:grid;gap:14px}
@@ -476,3 +535,24 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 .history-entry-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
 .history-entry-date{font-family:var(--f-data);font-size:12.5px;color:var(--ink-3)}
 .history-entry-remarks{font-size:13px;color:var(--ink);margin-top:6px;line-height:1.5}
+
+/* ---------------- Master: collapsible filters panel ---------------- */
+.filters-panel{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  padding:14px 0;margin-bottom:4px;border-bottom:1px solid var(--rule-soft);
+}
+.filters-chip{
+  display:inline-flex;align-items:center;font:600 11px/1 var(--f-data);
+  padding:2px 7px;border-radius:999px;background:var(--gold-wash);color:var(--gold-deep);
+  margin-left:6px;
+}
+.filters-chip:empty{display:none}
+
+/* ---------------- Master: emphasis banner ---------------- */
+.insight-banner{
+  background:var(--deck-navy);border-radius:var(--r);padding:14px 20px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  margin-bottom:16px;flex-wrap:wrap;
+}
+.insight-banner-text{font:500 16px/1.4 var(--f-display);color:#fff}
+.insight-banner-delta{font:600 12px/1 var(--f-data);color:rgba(255,255,255,.75);white-space:nowrap}
