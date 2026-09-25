@@ -556,3 +556,27 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 }
 .insight-banner-text{font:500 16px/1.4 var(--f-display);color:#fff}
 .insight-banner-delta{font:600 12px/1 var(--f-data);color:rgba(255,255,255,.75);white-space:nowrap}
+
+/* ---------------- Master: page-wide filter chips ---------------- */
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.chip-toggle{
+  display:inline-flex;align-items:center;gap:7px;font:600 13px/1 var(--f-ui);
+  padding:8px 12px 8px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--rule);background:var(--paper-2);color:var(--ink-2);
+}
+.chip-toggle .chip-count{
+  font:600 11px/1 var(--f-data);padding:3px 8px;border-radius:999px;
+  background:var(--rule-soft);color:var(--ink-3);
+}
+.chip-toggle.active{background:var(--gold-wash);border-color:transparent;color:var(--gold-deep)}
+.chip-toggle.active .chip-count{background:var(--gold-deep);color:#fff}
+
+/* ---------------- Master: light stat grid, replaces the dark funnel bars ---------------- */
+.stat-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:16px}
+.stat-grid .sg-card{
+  background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--r);
+  box-shadow:var(--shadow);padding:16px;
+}
+.stat-grid .sg-num{font:600 22px/1 var(--f-data);color:var(--ink)}
+.stat-grid .sg-label{font:500 12px/1 var(--f-ui);color:var(--ink-3);margin-top:6px}
+@media (max-width:900px){ .stat-grid{grid-template-columns:repeat(3,1fr)} }
