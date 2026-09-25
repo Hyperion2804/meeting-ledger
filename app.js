@@ -1797,7 +1797,6 @@ $("master-rm-filter").addEventListener("change", renderMaster);
 $("btn-filters-toggle").addEventListener("click", () => {
   $("master-filters-panel").hidden = !$("master-filters-panel").hidden;
 });
-$("all-type-filter").addEventListener("change", renderMaster);
 
 function populateMasterRmFilter() {
   const sel = $("master-rm-filter");
@@ -1998,6 +1997,49 @@ function renderFunnelInto(containerId, rows, s, emptyLabel) {
       }).join("");
 }
 
+// Sheets' page-wide filter chips. Counts are always computed against the
+// date+RM-scoped base set, never against each other — picking "Interested"
+// doesn't change what "Wealth Manager" shows a count of, same principle
+// as Gmail's own filter chips. Segment and Result are two independent
+// single-select facets, combined with AND when both are active.
+let masterSegmentFilter = "";
+let masterResultFilter = "";
+
+function renderMasterChips(baseRows) {
+  const allActive = !masterSegmentFilter && !masterResultFilter;
+  let html = `<button type="button" class="chip-toggle${allActive ? " active" : ""}" data-chip="all">All meetings <span class="chip-count">${baseRows.length}</span></button>`;
+  OPTIONS.result.forEach((r) => {
+    const count = baseRows.filter((x) => x.result === r).length;
+    html += `<button type="button" class="chip-toggle${masterResultFilter === r ? " active" : ""}" data-chip="result:${esc(r)}">${esc(r)} <span class="chip-count">${count}</span></button>`;
+  });
+  OPTIONS.personType.forEach((p) => {
+    const count = baseRows.filter((x) => x.personType === p).length;
+    html += `<button type="button" class="chip-toggle${masterSegmentFilter === p ? " active" : ""}" data-chip="segment:${esc(p)}">${esc(p)} <span class="chip-count">${count}</span></button>`;
+  });
+  $("master-chips").innerHTML = html;
+
+  $("master-chips").querySelectorAll("[data-chip]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const v = b.dataset.chip;
+      if (v === "all") { masterSegmentFilter = ""; masterResultFilter = ""; }
+      else if (v.startsWith("result:")) { const val = v.slice(7); masterResultFilter = masterResultFilter === val ? "" : val; }
+      else if (v.startsWith("segment:")) { const val = v.slice(8); masterSegmentFilter = masterSegmentFilter === val ? "" : val; }
+      renderMaster();
+    }));
+}
+
+// Replaces the dark funnel bars on Sheets specifically — Day view keeps
+// its own bar-funnel treatment for the before/on-day comparison, which
+// wasn't part of this redesign.
+function renderStatGrid(containerId, s) {
+  const cells = [
+    ["Reachouts", s.total], ["First", s.first], ["Follow-ups", s.followup],
+    ["Interested", s.allInterested], ["Lead / docs in", s.allShared], ["Converted", s.allDone]
+  ];
+  $(containerId).innerHTML = cells.map(([label, v]) =>
+    `<div class="sg-card"><div class="sg-num">${v}</div><div class="sg-label">${esc(label)}</div></div>`).join("");
+}
+
 function renderMaster() {
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
@@ -2011,8 +2053,17 @@ function renderMaster() {
 
   $("filters-summary-chip").textContent = who ? `${who} · ${label}` : label;
 
-  /* --- the funnel --- */
-  renderFunnelInto("funnel-bands", rows, s, label);
+  renderMasterChips(rows);
+  const filteredRows = rows.filter((r) =>
+    (!masterSegmentFilter || r.personType === masterSegmentFilter) &&
+    (!masterResultFilter || r.result === masterResultFilter));
+  const sf = summarise(filteredRows);
+
+  /* --- the stat grid — replaces the old dark funnel bars on Sheets.
+     Reflects whichever chips are active; the insight banner above it
+     deliberately does not, so it stays a stable headline stat rather
+     than becoming tautological the moment a Result chip is selected. */
+  renderStatGrid("master-stat-grid", sf);
 
   /* --- insight banner: a real computed number, never a placeholder.
      Only compares to the prior calendar month when we're actually in
@@ -2044,9 +2095,9 @@ function renderMaster() {
     banner.hidden = false;
   }
 
-  /* --- by RM --- */
+  /* --- by RM (respects the active chips) --- */
   const byRm = new Map();
-  for (const r of rows) {
+  for (const r of filteredRows) {
     if (!byRm.has(r.rmEmail)) byRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
     byRm.get(r.rmEmail).rows.push(r);
   }
@@ -2056,26 +2107,34 @@ function renderMaster() {
   renderSegmentTables("rm-segment-tables", "Relationship manager",
     [...byRm.values()].map((g) => ({ label: g.name, meetings: g.rows })), "All RMs");
 
-  /* --- visual dashboard: stat strip + charts --- */
-  renderDashStrip(s, rmRows.length);
-  renderCharts(from, to, rows, s, rmRows);
+  /* --- visual dashboard: stat strip + charts — deliberately stays on the
+     unfiltered base set, same reasoning as the insight banner above. --- */
+  const dashByRm = new Map();
+  for (const r of rows) {
+    if (!dashByRm.has(r.rmEmail)) dashByRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
+    dashByRm.get(r.rmEmail).rows.push(r);
+  }
+  const dashRmRows = [...dashByRm.values()].map((g) => ({ name: g.name, s: summarise(g.rows) }))
+    .sort((a, b) => b.s.total - a.s.total);
+  renderDashStrip(s, dashRmRows.length);
+  renderCharts(from, to, rows, s, dashRmRows);
 
-  /* --- plan vs achievement --- */
+  /* --- plan vs achievement — stays on the unfiltered base set; Result
+     doesn't apply to a planned-vs-actual volume metric, and Segment is
+     already broken out as its own columns inside this table. --- */
   renderAchievement();
 
-  /* --- day by day, one table per segment, no sideways scroll --- */
+  /* --- day by day, one table per segment, no sideways scroll (respects the active chips) --- */
   const dayRowDefs = [];
   for (const iso of eachDateISO(from, to)) {
-    const drows = rows.filter((r) => r.date === iso);
+    const drows = filteredRows.filter((r) => r.date === iso);
     if (drows.length) dayRowDefs.push({ label: fmtDay(iso), meetings: drows });
   }
   renderSegmentTables("daily-segment-tables", "Date", dayRowDefs, "Total");
 
-  /* --- every meeting --- */
-  const typeFilter = $("all-type-filter").value;
-  const allRows = typeFilter === "all" ? rows : rows.filter((r) => r.personType === typeFilter);
-  $("all-count").textContent = `${allRows.length} row${allRows.length === 1 ? "" : "s"}`;
-  const sorted = [...allRows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  /* --- every meeting (respects the active chips) --- */
+  $("all-count").textContent = `${filteredRows.length} row${filteredRows.length === 1 ? "" : "s"}`;
+  const sorted = [...filteredRows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
@@ -2096,10 +2155,13 @@ function renderMaster() {
   $("tbl-all").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
 
-  /* --- leads shared with the team (Admin/Superadmin see all, Team Lead sees their own reports', never Observer) --- */
+  /* --- leads shared with the team (Admin/Superadmin see all, Team Lead sees their own reports', never Observer) ---
+     Segment chip applies (leads carry a personType); Result doesn't —
+     a lead has no "meeting result" field of its own to filter by. --- */
   $("leads-card").hidden = !canSeeTeamLeads();
   if (canSeeTeamLeads()) {
-    const leadRows = state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter))
+    const leadRows = state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter)
+        && (!masterSegmentFilter || l.personType === masterSegmentFilter))
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     $("leads-count").textContent = `${leadRows.length} lead${leadRows.length === 1 ? "" : "s"}`;
     $("tbl-leads").innerHTML = `<thead><tr>
