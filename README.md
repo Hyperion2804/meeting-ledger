@@ -206,6 +206,25 @@ if someone tried to force it through the browser console.
 
 ## Rules of the road
 
+**Travel Plan is a real approval workflow.** File one from My meetings →
+Travel plan — destination, dates, meetings/events planned, optional
+remarks. It's genuinely hierarchical: an RM's plan goes to whoever they
+report to; a Team Lead's plan (they have no manager of their own) and
+anyone's whose reporting line isn't set yet both fall to the same place —
+any Admin or Superadmin can decide it. Admin and Superadmin also approve
+**each other's** plans, since neither sits above the other. Decisions
+happen on the new **Approvals** tab, visible only to Team Lead, Admin,
+and Superadmin — never RM, never Observer.
+
+**Click a name to see their history.** The separate "History" button is
+gone from every table — the person's name itself is now the trigger,
+on My History, Master's Every Meeting, and Day view alike.
+
+**A soft warning on likely duplicate First meetings.** Pick "First" and
+enter a phone number that already has meetings on record, and a plain
+amber note appears — "Did you mean Follow-up?" It never blocks saving;
+it's there so the choice is deliberate, not a slip.
+
 **Weekly Plan is different from the daily numbers plan.** "Tomorrow's Plan"
 on the Log tab is still just counts. **Weekly Plan** (its own sub-tab, next
 to Leads) is the real thing — who you intend to meet, where, and why,
