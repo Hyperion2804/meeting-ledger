@@ -6,7 +6,7 @@ import {
   sendEmailVerification, sendPasswordResetEmail, reload
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc,
+  getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc,
   deleteDoc, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], travelPlans: [], reportEmails: [], page: null, editingId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -314,9 +314,9 @@ onAuthStateChanged(auth, async (user) => {
 /* ============================ navigation ============================ */
 function buildTabs() {
   const tabs = isAdminOrAbove()
-    ? [["master", "Master"], ["log", "My meetings"], ["team", "Team"], ["contacts", "Contacts"]]
+    ? [["master", "Master"], ["log", "My meetings"], ["approvals", "Approvals"], ["team", "Team"], ["contacts", "Contacts"]]
     : isTeamLead()
-    ? [["master", "Master"], ["log", "My meetings"], ["contacts", "Contacts"]]
+    ? [["master", "Master"], ["log", "My meetings"], ["approvals", "Approvals"], ["contacts", "Contacts"]]
     : isObserver()
     ? [["master", "Master"], ["team", "Team"], ["contacts", "Contacts"]]
     : [["log", "My meetings"], ["contacts", "Contacts"]];
@@ -328,13 +328,14 @@ function buildTabs() {
 
 function show(page) {
   state.page = page;
-  ["log", "master", "team", "contacts"].forEach((p) => { $("page-" + p).hidden = p !== page; });
+  ["log", "master", "team", "contacts", "approvals"].forEach((p) => { $("page-" + p).hidden = p !== page; });
   $("tabs").querySelectorAll(".tab").forEach((b) =>
     b.setAttribute("aria-selected", String(b.dataset.page === page)));
   if (page === "log") renderLog();
   if (page === "master") { populateMasterRmFilter(); renderMaster(); }
   if (page === "team") { populateRoleOptions(); renderTeam(); }
   if (page === "contacts") renderContacts();
+  if (page === "approvals") renderApprovals();
 }
 
 /* ============================ data ============================ */
@@ -346,6 +347,7 @@ async function loadAll() {
     loadContacts(),
     loadLeads(),
     loadWeeklyPlans(),
+    loadTravelPlans(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
 }
@@ -392,6 +394,17 @@ async function loadWeeklyPlans() {
   state.weeklyPlans = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .sort((x, y) => (x.date || "").localeCompare(y.date || ""));
+}
+
+async function loadTravelPlans() {
+  const col = collection(db, "travelPlans");
+  const q = canViewAll() ? col
+    : isTeamLead() ? query(col, where("rmEmail", "in", scopeEmails()))
+    : query(col, where("rmEmail", "==", state.user.email));
+  const snap = await getDocs(q);
+  state.travelPlans = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((x, y) => (y.fromDate || "").localeCompare(x.fromDate || ""));
 }
 
 async function loadPlans() {
@@ -674,6 +687,25 @@ async function lookupContact() {
 
 $("f-contactMode").addEventListener("change", () => { contactModeTouched = true; applyContactMode(); });
 $("f-meetingType").addEventListener("change", toggleContactMode);
+$("f-meetingType").addEventListener("change", checkDuplicateFirstMeeting);
+$("f-phone").addEventListener("input", checkDuplicateFirstMeeting);
+
+// Soft warning only — never blocks saving. Flags when someone's about to
+// log a "First" meeting for a phone number that already has history,
+// which usually means they meant "Follow-up" instead.
+function checkDuplicateFirstMeeting() {
+  const banner = $("dup-first-warning");
+  const digits = phoneDigitsOf($("f-phone").value);
+  if ($("f-meetingType").value !== "First" || digits.length !== 10) { banner.hidden = true; return; }
+
+  const prior = state.meetings.filter((r) => r.phone === digits && r.id !== state.editingId);
+  if (!prior.length) { banner.hidden = true; return; }
+
+  const latest = [...prior].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+  banner.textContent = `This number already has ${prior.length} meeting${prior.length === 1 ? "" : "s"} logged — most recently on ${fmtDMY(latest.date)}. Did you mean Follow-up?`;
+  banner.hidden = false;
+}
+
 $("btn-lookup-contact").addEventListener("click", lookupContact);
 
 // Prospect source = Reference → ask who referred them.
@@ -841,6 +873,7 @@ function resetForm() {
   $("f-phone").value = "";
   $("f-email").value = "";
   $("f-address").value = "";
+  $("dup-first-warning").hidden = true;
   $("f-date").max = todayISO();
   $("f-date").value = todayISO();
   $("f-id").value = "";
@@ -1366,6 +1399,7 @@ function startEdit(id) {
   $("f-progressed").value = r.progressed || "";
   toggleContactMode();
   toggleLeadsSection();
+  checkDuplicateFirstMeeting();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -1521,6 +1555,131 @@ function renderMasterWeeklyPlan() {
 $("master-weeklyplan-month").value = thisMonth();
 $("master-weeklyplan-month").addEventListener("change", renderMasterWeeklyPlan);
 
+/* ============================ travel plan: filed for approval ============================ */
+const TP_STATUS = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" };
+
+$("travelplan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("travelplan-error");
+  err.hidden = true;
+
+  const destination = $("tp-destination").value.trim();
+  const fromDate = $("tp-from").value;
+  const toDate = $("tp-to").value;
+  const meetingsPlanned = parseInt($("tp-meetings").value, 10) || 0;
+  const eventsPlanned = parseInt($("tp-events").value, 10) || 0;
+  const remarks = $("tp-remarks").value.trim();
+
+  if (!destination) { err.textContent = "Add a destination."; err.hidden = false; return; }
+  if (!fromDate || !toDate) { err.textContent = "Pick both dates."; err.hidden = false; return; }
+  if (toDate < fromDate) { err.textContent = "The end date can't be before the start date."; err.hidden = false; return; }
+
+  try {
+    await addDoc(collection(db, "travelPlans"), {
+      destination, fromDate, toDate, meetingsPlanned, eventsPlanned, remarks,
+      status: TP_STATUS.PENDING,
+      rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+      rmEmployeeId: state.profile.employeeId || "",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    toast("Sent for approval");
+    $("travelplan-form").reset();
+    $("tp-meetings").value = "0"; $("tp-events").value = "0";
+    await loadTravelPlans();
+    renderTravelPlan();
+  } catch (e2) {
+    err.textContent = "Couldn't save that. " + (e2.message || "");
+    err.hidden = false;
+  }
+});
+
+function tpStatusTag(status) {
+  const cls = status === TP_STATUS.APPROVED ? "tag-green" : status === TP_STATUS.REJECTED ? "tag-rust" : "tag-amber";
+  return `<span class="tag ${cls}">${esc(status)}</span>`;
+}
+
+function renderTravelPlan() {
+  const mine = state.travelPlans.filter((p) => p.rmEmail === state.user.email);
+  if (!mine.length) {
+    $("travelplan-list").innerHTML = `<p class="empty">No travel plans filed yet. Add one on the left.</p>`;
+    return;
+  }
+  $("travelplan-list").innerHTML = mine.map((p) => `
+    <article class="entry">
+      <div class="entry-top">
+        <span class="entry-name">${esc(p.destination)}</span>
+        ${tpStatusTag(p.status)}
+      </div>
+      <div class="entry-meta">${esc(fmtDMY(p.fromDate))} – ${esc(fmtDMY(p.toDate))} · ${p.meetingsPlanned} meeting${p.meetingsPlanned === 1 ? "" : "s"}${p.eventsPlanned ? ` · ${p.eventsPlanned} event${p.eventsPlanned === 1 ? "" : "s"}` : ""}</div>
+      ${p.remarks ? `<div class="entry-remarks">${esc(p.remarks)}</div>` : ""}
+      ${p.status !== TP_STATUS.PENDING && p.approvedByName ? `<div class="entry-remarks">${esc(p.status)} by ${esc(p.approvedByName)}</div>` : ""}
+    </article>`).join("");
+}
+
+/* ============================ approvals: Team Lead / Admin / Superadmin ============================ */
+// Who this person can act on: Admin/Superadmin see and can decide on
+// everyone's; Team Lead sees and can decide on their own reports' only.
+function myApprovableTravelPlans() {
+  if (isAdminOrAbove()) return state.travelPlans;
+  if (isTeamLead()) return state.travelPlans.filter((p) => state.reportEmails.includes(p.rmEmail));
+  return [];
+}
+
+function renderApprovals() {
+  const mine = myApprovableTravelPlans();
+  const pending = mine.filter((p) => p.status === TP_STATUS.PENDING)
+    .sort((a, b) => (a.fromDate || "").localeCompare(b.fromDate || ""));
+  const decided = mine.filter((p) => p.status !== TP_STATUS.PENDING)
+    .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
+
+  $("approvals-sub").textContent = `${pending.length} plan${pending.length === 1 ? "" : "s"} waiting on you.`;
+  $("approvals-pending-count").textContent = `${pending.length} row${pending.length === 1 ? "" : "s"}`;
+  $("tbl-approvals-pending").innerHTML = `<thead><tr>
+    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Meetings</th><th>Events</th><th>Remarks</th><th></th>
+    </tr></thead><tbody>${
+      pending.length ? pending.map((p) => `<tr>
+        <td>${esc(p.rmName)}</td><td class="name">${esc(p.destination)}</td>
+        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
+        <td class="num">${p.meetingsPlanned}</td><td class="num">${p.eventsPlanned || 0}</td>
+        <td class="wrap">${esc(p.remarks || "")}</td>
+        <td><button class="btn-link" data-approve="${p.id}">Approve</button> · <button class="btn-link danger" data-reject="${p.id}">Reject</button></td></tr>`).join("")
+        : `<tr><td colspan="8" class="empty">Nothing pending.</td></tr>`
+    }</tbody>`;
+
+  $("approvals-decided-count").textContent = `${decided.length} row${decided.length === 1 ? "" : "s"}`;
+  $("tbl-approvals-decided").innerHTML = `<thead><tr>
+    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Status</th><th>Decided by</th>
+    </tr></thead><tbody>${
+      decided.length ? decided.map((p) => `<tr>
+        <td>${esc(p.rmName)}</td><td class="name">${esc(p.destination)}</td>
+        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
+        <td>${tpStatusTag(p.status)}</td><td>${esc(p.approvedByName || "")}</td></tr>`).join("")
+        : `<tr><td colspan="6" class="empty">Nothing decided yet.</td></tr>`
+    }</tbody>`;
+
+  $("tbl-approvals-pending").querySelectorAll("[data-approve]").forEach((b) =>
+    b.addEventListener("click", () => decideTravelPlan(b.dataset.approve, TP_STATUS.APPROVED)));
+  $("tbl-approvals-pending").querySelectorAll("[data-reject]").forEach((b) =>
+    b.addEventListener("click", () => decideTravelPlan(b.dataset.reject, TP_STATUS.REJECTED)));
+}
+
+async function decideTravelPlan(id, decision) {
+  const p = state.travelPlans.find((x) => x.id === id);
+  if (!p) return;
+  if (!confirm(`${decision} ${p.rmName}'s trip to ${p.destination}?`)) return;
+  try {
+    await updateDoc(doc(db, "travelPlans", id), {
+      status: decision, approvedByEmail: state.user.email, approvedByName: state.profile.name || state.user.email,
+      updatedAt: serverTimestamp()
+    });
+    toast(`${decision}`);
+    await loadTravelPlans();
+    renderApprovals();
+  } catch (e) {
+    toast("Couldn't save that. " + (e.message || ""));
+  }
+}
+
 /* ============================ RM: tomorrow's plan ============================ */
 const tomorrowISO = () => {
   const d = new Date(); d.setDate(d.getDate() + 1);
@@ -1635,7 +1794,9 @@ $("log-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("log-panel-history").hidden = logSub !== "history";
     $("log-panel-leads").hidden = logSub !== "leads";
     $("log-panel-weeklyplan").hidden = logSub !== "weeklyplan";
+    $("log-panel-travelplan").hidden = logSub !== "travelplan";
     if (logSub === "weeklyplan") renderWeeklyPlan();
+    if (logSub === "travelplan") renderTravelPlan();
   }));
 
 $("history-month").value = thisMonth();
@@ -1680,14 +1841,14 @@ function renderHistory(mine) {
     <th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
     </tr></thead><tbody>${
       rows.length ? rows.map((r) => `<tr>
-        <td class="num">${esc(fmtDMY(r.date))}</td><td class="name">${esc(r.prospectName)}</td>
+        <td class="num">${esc(fmtDMY(r.date))}</td><td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td>
         <td>${esc(r.personType)}</td><td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone || "")}</td><td>${esc(r.email || "")}</td><td class="wrap">${esc(r.address || "")}</td>
         <td>${esc(sourceDetail(r))}</td><td>${resultTag(r.result)}</td>
         <td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
         <td class="wrap">${esc(r.remarks || "")}</td>
-        <td><button class="btn-link" data-edit="${r.id}">Edit</button> · <button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
+        <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
     }</tbody>`;
 
@@ -2138,19 +2299,18 @@ function renderMaster() {
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td class="num">${esc(fmtDMY(r.date))}</td><td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name">${esc(r.prospectName)}</td><td>${esc(r.personType)}</td>
+        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td><td>${esc(r.personType)}</td>
         <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td>
-        <td><button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
-        : `<tr><td colspan="15" class="empty">No meetings this month.</td></tr>`
+        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
+        : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
   $("tbl-all").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
@@ -2235,19 +2395,18 @@ function renderDayView() {
   $("tbl-day-all").innerHTML = `<thead><tr>
     <th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name">${esc(r.prospectName)}</td><td>${esc(r.personType)}</td>
+        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td><td>${esc(r.personType)}</td>
         <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
         <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td>
-        <td><button class="btn-link" data-history="${esc(r.phone)}">History</button></td></tr>`).join("")
-        : `<tr><td colspan="14" class="empty">No meetings on this day.</td></tr>`
+        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
+        : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
   $("tbl-day-all").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
