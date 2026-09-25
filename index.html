@@ -463,14 +463,14 @@
     </div>
 
     <div id="master-panel-sheets" hidden>
+      <div id="master-chips" class="chip-row"></div>
+
       <div id="insight-banner" class="insight-banner" hidden>
         <span class="insight-banner-text" id="insight-banner-text"></span>
         <span class="insight-banner-delta" id="insight-banner-delta"></span>
       </div>
 
-      <section class="funnel" aria-label="Conversion funnel">
-        <div id="funnel-bands" class="funnel-bands"></div>
-      </section>
+      <div id="master-stat-grid" class="stat-grid"></div>
 
       <section class="card">
         <div class="card-head">
@@ -500,15 +500,7 @@
       <section class="card">
         <div class="card-head">
           <h2>Every meeting</h2>
-          <div class="page-head-controls">
-            <select id="all-type-filter" class="month-input">
-              <option value="all">All types</option>
-              <option value="Wealth Manager">Wealth Manager</option>
-              <option value="Channel Partner">Channel Partner</option>
-              <option value="Investor">Investor</option>
-            </select>
-            <span class="card-note" id="all-count"></span>
-          </div>
+          <span class="card-note" id="all-count"></span>
         </div>
         <div class="scroller"><table id="tbl-all" class="grid"></table></div>
       </section>
