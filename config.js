@@ -1,7 +1,4 @@
-// ============================================================
-//  EDIT THIS FILE — it is the only one you need to change.
-//  Everything else works as-is.
-// ============================================================
+
 
 // 1. Your organisation's email domain. Only these addresses can sign in.
 export const ORG_DOMAIN = "hyperioncapital.in";
