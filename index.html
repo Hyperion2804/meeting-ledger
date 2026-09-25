@@ -98,6 +98,7 @@
       <button class="subtab" data-sub="history" role="tab" aria-selected="false">My history</button>
       <button class="subtab" data-sub="leads" role="tab" aria-selected="false">Leads</button>
       <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
+      <button class="subtab" data-sub="travelplan" role="tab" aria-selected="false">Travel plan</button>
     </nav>
 
     <div id="log-panel-log" class="page-split">
@@ -158,6 +159,7 @@
             <input type="email" id="f-email" placeholder="name@example.com" autocomplete="off" />
           </label>
         </div>
+        <p id="dup-first-warning" class="dup-warning" hidden></p>
         <label class="field">
           <span>Address</span>
           <input type="text" id="f-address" placeholder="City, area" autocomplete="off" required />
@@ -404,6 +406,56 @@
         </section>
       </div>
     </div>
+
+    <div id="log-panel-travelplan" hidden>
+      <div class="page-split">
+        <section class="card form-card">
+          <div class="card-head">
+            <h2>File a travel plan</h2>
+            <span class="card-note">Sent for approval once submitted</span>
+          </div>
+          <form id="travelplan-form" class="form" novalidate>
+            <label class="field">
+              <span>Destination</span>
+              <input type="text" id="tp-destination" placeholder="Where are you going?" autocomplete="off" required />
+            </label>
+            <div class="row row-2">
+              <label class="field">
+                <span>From</span>
+                <input type="date" id="tp-from" required />
+              </label>
+              <label class="field">
+                <span>To</span>
+                <input type="date" id="tp-to" required />
+              </label>
+            </div>
+            <div class="row row-2">
+              <label class="field">
+                <span>Meetings planned</span>
+                <input type="number" id="tp-meetings" min="0" step="1" value="0" required />
+              </label>
+              <label class="field">
+                <span>Events planned <em>optional</em></span>
+                <input type="number" id="tp-events" min="0" step="1" value="0" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Remarks <em>optional</em></span>
+              <textarea id="tp-remarks" rows="3" placeholder="Anything worth noting"></textarea>
+            </label>
+            <p id="travelplan-error" class="form-error" hidden></p>
+            <button type="submit" class="btn btn-primary">Submit for approval</button>
+          </form>
+        </section>
+
+        <section class="card list-card">
+          <div class="card-head">
+            <h2>Your travel plans</h2>
+          </div>
+          <div id="travelplan-list" class="list"></div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <!-- ---------------- ADMIN: MASTER ---------------- -->
@@ -627,6 +679,30 @@
     <section class="card">
       <div class="card-head"><h2>Current team</h2></div>
       <div class="scroller"><table id="tbl-team" class="grid"></table></div>
+    </section>
+  </main>
+
+  <!-- ---------------- APPROVALS: TRAVEL PLANS ---------------- -->
+  <main id="page-approvals" class="page" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="display">Travel plan approvals</h1>
+        <p class="lede" id="approvals-sub">Pending plans waiting on you.</p>
+      </div>
+    </div>
+    <section class="card">
+      <div class="card-head">
+        <h2>Pending</h2>
+        <span class="card-note" id="approvals-pending-count"></span>
+      </div>
+      <div class="scroller"><table id="tbl-approvals-pending" class="grid"></table></div>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>Already decided</h2>
+        <span class="card-note" id="approvals-decided-count"></span>
+      </div>
+      <div class="scroller"><table id="tbl-approvals-decided" class="grid"></table></div>
     </section>
   </main>
 
