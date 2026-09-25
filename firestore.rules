@@ -34,6 +34,12 @@ rules_version = '2';
 //    weeklyPlans — who someone intends to meet, before it happens. Same
 //               visibility as meetings: RM own, Team Lead own + reports',
 //               everyone else (including Observer) sees all.
+//    travelPlans — a trip filed for approval. Same visibility shape.
+//               Approval: Team Lead approves their own reports; Admin
+//               and Superadmin approve each other and everyone else —
+//               that cross-approval is also what covers a Team Lead's
+//               own plan (they have no manager of their own) and anyone
+//               whose managedBy isn't set yet.
 // ============================================================
 
 service cloud.firestore {
@@ -264,6 +270,44 @@ service cloud.firestore {
 
       allow delete: if isAdminOrAbove()
         || (canLog() && resource.data.rmEmail == callerEmail());
+    }
+
+    // ---------- travelPlans: filed for approval before a trip happens ----------
+    // Filed by anyone who can log a meeting (RM, Team Lead, Admin,
+    // Superadmin — never Observer). Same read visibility as everywhere
+    // else: RM own, Team Lead own + reports, Admin/Superadmin/Observer
+    // everyone's.
+    //
+    // Approval is genuinely hierarchical, not just "Admin approves
+    // everyone": a Team Lead approves their own reports' plans; Admin
+    // and Superadmin approve EACH OTHER'S plans (there's no tier above
+    // either of them, so they're paired as mutual approvers) as well as
+    // anyone else's — that fallback also quietly resolves what would
+    // otherwise be two gaps: a Team Lead has no manager of their own to
+    // route through, and anyone whose managedBy is still unset has
+    // nobody else to ask.
+    match /travelPlans/{planId} {
+      allow get, list: if canViewAll()
+        || (isMember() && resource.data.rmEmail == callerEmail())
+        || (isTeamLead() && isMyReport(resource.data.rmEmail));
+
+      allow create: if canLog()
+        && request.resource.data.rmEmail == callerEmail()
+        && request.resource.data.destination is string
+        && request.resource.data.destination.size() > 0
+        && request.resource.data.fromDate is string
+        && request.resource.data.toDate is string
+        && request.resource.data.meetingsPlanned is number
+        && request.resource.data.status == 'Pending';
+
+      // The filer can still fix a typo while it's undecided; once it's
+      // Approved or Rejected, only an approver can touch it further.
+      allow update: if isAdminOrAbove()
+        || (isTeamLead() && isMyReport(resource.data.rmEmail))
+        || (canLog() && resource.data.rmEmail == callerEmail() && resource.data.status == 'Pending');
+
+      allow delete: if isAdminOrAbove()
+        || (canLog() && resource.data.rmEmail == callerEmail() && resource.data.status == 'Pending');
     }
 
     // Nothing else is reachable.
