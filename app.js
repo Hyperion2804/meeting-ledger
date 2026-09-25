@@ -224,6 +224,24 @@ const doSignOut = () => {
   if (confirm("Sign out of Meeting Ledger?")) signOut(auth);
 };
 $("btn-signout").addEventListener("click", doSignOut);
+
+// Theme toggle. The inline script in <head> already applied any saved
+// choice before first paint — this just keeps the button's own icon/label
+// in sync and handles the actual switch.
+function syncThemeButton() {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  $("btn-theme").textContent = dark ? "☾" : "☀";
+  $("btn-theme").title = dark ? "Switch to light" : "Switch to dark";
+  $("btn-theme").setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+}
+$("btn-theme").addEventListener("click", () => {
+  const goingDark = document.documentElement.getAttribute("data-theme") !== "dark";
+  if (goingDark) document.documentElement.setAttribute("data-theme", "dark");
+  else document.documentElement.removeAttribute("data-theme");
+  try { localStorage.setItem("theme", goingDark ? "dark" : "light"); } catch (e) {}
+  syncThemeButton();
+});
+syncThemeButton();
 document.querySelectorAll("[data-signout]").forEach((b) => b.addEventListener("click", doSignOut));
 
 onAuthStateChanged(auth, async (user) => {
@@ -1776,6 +1794,9 @@ $("admin-month").max = thisMonth();
 $("export-from").max = todayISO();
 $("export-to").max = todayISO();
 $("master-rm-filter").addEventListener("change", renderMaster);
+$("btn-filters-toggle").addEventListener("click", () => {
+  $("master-filters-panel").hidden = !$("master-filters-panel").hidden;
+});
 $("all-type-filter").addEventListener("change", renderMaster);
 
 function populateMasterRmFilter() {
@@ -1988,8 +2009,40 @@ function renderMaster() {
     ? `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} · ${who} only.`
     : `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} across ${new Set(rows.map(r => r.rmEmail)).size} relationship manager${new Set(rows.map(r => r.rmEmail)).size === 1 ? "" : "s"}.`;
 
+  $("filters-summary-chip").textContent = who ? `${who} · ${label}` : label;
+
   /* --- the funnel --- */
   renderFunnelInto("funnel-bands", rows, s, label);
+
+  /* --- insight banner: a real computed number, never a placeholder.
+     Only compares to the prior calendar month when we're actually in
+     plain month mode — a custom range has no honest "previous period"
+     to compare against, so the delta simply doesn't show then. */
+  const banner = $("insight-banner");
+  if (s.total === 0) {
+    banner.hidden = true;
+  } else {
+    const pct = Math.round((s.allInterested / s.total) * 100);
+    $("insight-banner-text").textContent =
+      `${pct}% of ${who ? who + "'s" : "this month's"} meetings converted to Interested${who ? "" : " this period"}.`;
+    const usingCustomRange = !!($("export-from").value && $("export-to").value);
+    $("insight-banner-delta").textContent = "";
+    if (!usingCustomRange) {
+      const m = $("admin-month").value || thisMonth();
+      const prevMonth = addDaysISO(`${m}-01`, -1).slice(0, 7);
+      const prevRows = state.meetings.filter((r) => r.date.startsWith(prevMonth) && (!rmFilter || r.rmEmail === rmFilter));
+      if (prevRows.length) {
+        const prevPct = Math.round((summarise(prevRows).allInterested / prevRows.length) * 100);
+        const delta = pct - prevPct;
+        if (delta !== 0) {
+          const prevLabel = new Date(Number(prevMonth.slice(0, 4)), Number(prevMonth.slice(5, 7)) - 1, 1)
+            .toLocaleDateString(undefined, { month: "short" });
+          $("insight-banner-delta").textContent = `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)} pts vs ${prevLabel}`;
+        }
+      }
+    }
+    banner.hidden = false;
+  }
 
   /* --- by RM --- */
   const byRm = new Map();
