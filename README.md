@@ -319,6 +319,9 @@ documents for Investors. The form relabels itself when you pick the type.
 
 **Every field is mandatory.** The form won't submit until it's all filled —
 phone, email, address, source, result, follow-up date, remarks, all of it.
+The one exception is **follow-up date on a Not Interested meeting**: there's
+nothing to follow up, so it's optional there (you can still set one if you
+genuinely plan to revisit). The Excel importer follows the same rule.
 Fields that don't apply yet (like the Not Interested reason, or the Reference
 name) simply don't appear until they're relevant, and switch off again if you
 change your mind.
