@@ -769,6 +769,11 @@ function toggleNotInterestedField() {
   $("f-notInterestedReason").required = on;
   $("f-notInterestedReason").disabled = !on;
   if (!on) $("f-notInterestedReason").value = "";
+  // Nothing to follow up on a Not Interested meeting, so the date becomes
+  // optional there (an RM can still set one for a deliberate revisit).
+  // Required for Interested and To be followed up, as before.
+  $("f-followUpDate").required = !on;
+  $("lbl-followUpOptional").hidden = !on;
 }
 
 // Shared/progressed only make sense once the person is Interested — for
@@ -919,6 +924,7 @@ const HEADER_ALIASES = {
   "meeting result": "result", result: "result",
   "not interested reason": "notinterestedreason",
   "lead / docs shared": "shared", "lead/docs shared": "shared", "lead shared": "shared", "docs shared": "shared",
+  "lead / document shared": "shared", "lead / documents shared": "shared",
   "meeting done / logged in": "progressed", "meeting done": "progressed", "logged in": "progressed",
   "follow-up date": "followupdate", "followup date": "followupdate", "follow up date": "followupdate",
   remarks: "remarks"
@@ -928,7 +934,12 @@ function normalizeFromList(v, list) {
   const raw = String(v || "").trim();
   return list.find((x) => x.toLowerCase() === raw.toLowerCase()) || null;
 }
-function normalizeHeader(h) { return HEADER_ALIASES[String(h || "").trim().toLowerCase()] || null; }
+// Header spacing varies ("Lead/Docs Shared" vs "Lead / Docs Shared"), so
+// collapse whitespace and standardise spacing around "/" before lookup.
+function normalizeHeader(h) {
+  const key = String(h || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/\s*\/\s*/g, " / ");
+  return HEADER_ALIASES[key] || null;
+}
 
 function parseFlexibleDate(v) {
   if (!v && v !== 0) return null;
@@ -1013,8 +1024,13 @@ async function runImport(file) {
 
     const progressed = shared === "Yes" ? (normalizeFromList(row.progressed, OPTIONS.progressed) || "") : "";
 
-    const followUpDate = parseFlexibleDate(row.followupdate);
-    if (!followUpDate) return skip("Missing or unreadable Follow-up Date");
+    // Required unless the result is Not Interested. If a date IS given it
+    // must still be readable — never silently drop something the RM typed.
+    const followUpRaw = row.followupdate;
+    const followUpGiven = followUpRaw !== undefined && followUpRaw !== null && String(followUpRaw).trim() !== "";
+    const followUpDate = followUpGiven ? parseFlexibleDate(followUpRaw) : "";
+    if (followUpGiven && !followUpDate) return skip(`Unreadable Follow-up Date: "${followUpRaw}"`);
+    if (!followUpDate && result !== "Not Interested") return skip("Missing Follow-up Date (required unless the result is Not Interested)");
 
     const remarks = String(row.remarks || "").trim();
     if (!remarks) return skip("Missing Remarks");
@@ -1109,7 +1125,9 @@ $("meeting-form").addEventListener("submit", async (e) => {
     ["meetingType", "type of meeting"], ["mode", "mode"], ["source", "prospect source"],
     ["result", "meeting result"], ["followUpDate", "follow-up date"], ["remarks", "remarks"]
   ];
-  const missing = required.find(([key]) => !payload[key]);
+  const missing = required
+    .filter(([key]) => !(key === "followUpDate" && payload.result === "Not Interested"))
+    .find(([key]) => !payload[key]);
   if (missing) {
     err.textContent = `Fill in the ${missing[1]} — every field is required.`;
     err.hidden = false;
