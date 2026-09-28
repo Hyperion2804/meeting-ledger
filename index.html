@@ -360,6 +360,29 @@
     </div>
 
     <div id="log-panel-weeklyplan" hidden>
+      <section class="card agenda-card">
+        <div class="card-head">
+          <h2>Week agenda</h2>
+          <div class="week-nav">
+            <button type="button" id="btn-agenda-prev" class="btn-link" title="Previous week">‹</button>
+            <span class="card-note" id="agenda-range-label"></span>
+            <button type="button" id="btn-agenda-next" class="btn-link" title="Next week">›</button>
+            <button type="button" id="btn-agenda-today" class="btn-link">This week</button>
+          </div>
+        </div>
+        <p id="agenda-banner" class="agenda-banner" hidden></p>
+        <div id="agenda-list" class="list agenda-list"></div>
+        <form id="agenda-form" class="form agenda-form" novalidate>
+          <label class="field">
+            <span>Add to this week <em>one item per line, or paste a whole list</em></span>
+            <textarea id="agenda-text" rows="3" placeholder="Things you plan to get done this week, no day needed"></textarea>
+          </label>
+          <p id="agenda-error" class="form-error" hidden></p>
+          <button type="submit" class="btn btn-primary">Add to agenda</button>
+        </form>
+        <p id="agenda-past-note" class="agenda-past-note" hidden>This week has ended, so nothing new can be added. Open items can be carried to this week.</p>
+      </section>
+
       <div class="page-split">
         <section class="card form-card">
           <div class="card-head">
@@ -633,6 +656,19 @@
           <span class="card-note" id="master-weeklyplan-count"></span>
         </div>
         <div class="scroller"><table id="tbl-master-weeklyplan" class="grid"></table></div>
+      </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Everyone's week agenda</h2>
+          <div class="week-nav">
+            <button type="button" id="btn-master-agenda-prev" class="btn-link" title="Previous week">‹</button>
+            <span class="card-note" id="master-agenda-range-label"></span>
+            <button type="button" id="btn-master-agenda-next" class="btn-link" title="Next week">›</button>
+            <button type="button" id="btn-master-agenda-today" class="btn-link">This week</button>
+            <span class="card-note" id="master-agenda-count"></span>
+          </div>
+        </div>
+        <div class="scroller"><table id="tbl-master-agenda" class="grid"></table></div>
       </section>
     </div>
   </main>
