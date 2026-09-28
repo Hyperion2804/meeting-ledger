@@ -238,6 +238,32 @@ Same visibility as everywhere else: your own plan is yours, Team Lead sees
 their reports' too, and Master gets its own **Weekly Plan** sub-tab showing
 everyone's — Admin, Superadmin, and Observer included.
 
+**Week agenda — for things without a fixed day.** At the top of the Weekly
+Plan sub-tab is a list tied to a *week*, not a date: meetings you haven't
+scheduled yet, and work that isn't a meeting at all (postings, listings,
+planning). Type one item per line, or paste a whole numbered list — each
+line becomes its own item and the "1." / "2." numbering is stripped. Use
+‹ › to plan ahead for next week. Each item can be marked Done or removed.
+
+When a day firms up, **Schedule** copies the item's text into the dated
+plan form below as the purpose; add who, where, and the day. The agenda
+item stays Open, since one item ("Meerut contact meetings") can become
+several meetings.
+
+**Nothing moves between weeks on its own.** Once a week ends it's
+read-only, and its open items get a **Carry to this week** button (or
+"Carry all"). Carrying marks the original *Carried* — so the old week
+still shows honestly what didn't get done — and puts an Open copy in the
+current week that remembers where it came from and when it was first
+planned. If anything is still open from earlier weeks, the current week
+shows a reminder with a **Review** link.
+
+Same visibility as the Weekly Plan. Master's Weekly Plan sub-tab has an
+**Everyone's week agenda** table with its own week arrows. The agenda is
+stored in its own collection (`weekAgendas`), so publishing the updated
+`firestore.rules` is required. The daily reminder email doesn't include
+agenda items yet.
+
 **Email is optional now.** Everything else on the form is still required;
 email is checked for a valid format only if something's actually typed.
 
