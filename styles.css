@@ -588,3 +588,18 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
   font-size:12.5px;color:var(--amber);background:var(--amber-wash);
   border:1px solid var(--rule);border-radius:8px;padding:9px 11px;margin:-4px 0 0;
 }
+
+/* ---------------- week agenda (Weekly plan tab) ---------------- */
+.agenda-list{max-height:none}
+.agenda-form{border-top:1px solid var(--rule-soft)}
+.agenda-text{font-weight:500;line-height:1.4}
+.agenda-done{text-decoration:line-through;color:var(--ink-3)}
+.agenda-banner{
+  font-size:12.5px;color:var(--amber);background:var(--amber-wash);
+  border-bottom:1px solid var(--rule);padding:9px 16px;margin:0;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.agenda-past-note{
+  font-size:12.5px;color:var(--ink-3);padding:12px 16px;margin:0;
+  border-top:1px solid var(--rule-soft);
+}
