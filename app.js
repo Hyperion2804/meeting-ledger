@@ -7,7 +7,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc,
-  deleteDoc, query, where, serverTimestamp
+  deleteDoc, query, where, serverTimestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ============================ setup ============================ */
@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], travelPlans: [], reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], weekAgendas: [], travelPlans: [], reportEmails: [], page: null, editingId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -347,6 +347,7 @@ async function loadAll() {
     loadContacts(),
     loadLeads(),
     loadWeeklyPlans(),
+    loadWeekAgendas(),
     loadTravelPlans(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
@@ -394,6 +395,16 @@ async function loadWeeklyPlans() {
   state.weeklyPlans = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .sort((x, y) => (x.date || "").localeCompare(y.date || ""));
+}
+
+// Undated week agenda items — same visibility shape as weeklyPlans.
+async function loadWeekAgendas() {
+  const col = collection(db, "weekAgendas");
+  const q = canViewAll() ? col
+    : isTeamLead() ? query(col, where("rmEmail", "in", scopeEmails()))
+    : query(col, where("rmEmail", "==", state.user.email));
+  const snap = await getDocs(q);
+  state.weekAgendas = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 async function loadTravelPlans() {
@@ -1468,6 +1479,7 @@ $("weeklyplan-form").addEventListener("submit", async (e) => {
 $("weeklyplan-month").addEventListener("change", renderWeeklyPlan);
 
 function renderWeeklyPlan() {
+  renderAgenda();   // the week agenda sits above the dated plan on the same sub-tab
   const m = $("weeklyplan-month").value || thisMonth();
   const mine = state.weeklyPlans.filter((p) => p.rmEmail === state.user.email && (p.date || "").startsWith(m))
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -1569,9 +1581,248 @@ function renderMasterWeeklyPlan() {
         <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>`).join("")
         : `<tr><td colspan="8" class="empty">Nothing planned this month.</td></tr>`
     }</tbody>`;
+  renderMasterAgenda();
 }
 $("master-weeklyplan-month").value = thisMonth();
 $("master-weeklyplan-month").addEventListener("change", renderMasterWeeklyPlan);
+
+/* ============================ week agenda: undated items for a week ============================ */
+// Things planned for a week without a fixed day: meetings not yet
+// scheduled, and non-meeting work (postings, listings, planning). One doc
+// per item, keyed to the Monday of its week (weekStart, YYYY-MM-DD).
+// Open items from an ended week move forward only when the person chooses
+// to: the old item is marked Carried (so that week keeps an honest record
+// of what didn't get done) and a fresh Open copy lands in the current week,
+// remembering where it came from (carriedFrom) and when it was first
+// planned (firstWeek).
+const AG_STATUS = { OPEN: "Open", DONE: "Done", CARRIED: "Carried" };
+const AGENDA_MAX_LEN = 500;     // per item — matches firestore.rules
+const AGENDA_MAX_LINES = 50;    // per paste
+const AGENDA_BATCH_ITEMS = 200; // carry writes 2 ops per item; Firestore caps a batch at 500
+
+let agendaRef = new Date();         // week on screen in Log → Weekly plan
+let masterAgendaRef = new Date();   // week on screen in Master → Weekly plan
+const agendaWeek = () => weekBoundsAround(agendaRef);
+const currentWeekStart = () => weekBoundsAround(new Date()).start;
+const agendaTag = (st) => st === AG_STATUS.DONE ? "tag-green" : st === AG_STATUS.CARRIED ? "tag-flat" : "tag-amber";
+
+// One item per line. Strips list markers people paste in ("1.", "2)",
+// "-", "•") but not a number that's part of the text ("1.5 Cr deal").
+function parseAgendaLines(text) {
+  return String(text || "").split(/\r?\n/)
+    .map((l) => l.replace(/^\s*(?:\d{1,3}[.)](?!\d)|[-•*–])\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function agendaOrigin(a) {
+  if (a.status === AG_STATUS.CARRIED && a.carriedTo) return `Carried to week of ${fmtDMY(a.carriedTo)}`;
+  if (!a.carriedFrom) return "";
+  const first = a.firstWeek && a.firstWeek !== a.carriedFrom ? ` · first planned week of ${fmtDMY(a.firstWeek)}` : "";
+  return `Carried from week of ${fmtDMY(a.carriedFrom)}${first}`;
+}
+
+$("btn-agenda-prev").addEventListener("click", () => { agendaRef.setDate(agendaRef.getDate() - 7); renderAgenda(); });
+$("btn-agenda-next").addEventListener("click", () => { agendaRef.setDate(agendaRef.getDate() + 7); renderAgenda(); });
+$("btn-agenda-today").addEventListener("click", () => { agendaRef = new Date(); renderAgenda(); });
+
+$("agenda-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("agenda-error");
+  err.hidden = true;
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+
+  const wk = agendaWeek();
+  if (wk.start < currentWeekStart()) return fail("That week has ended. Add items to this week or a later one.");
+  const items = parseAgendaLines($("agenda-text").value);
+  if (!items.length) return fail("Type at least one item.");
+  if (items.length > AGENDA_MAX_LINES) return fail(`That's ${items.length} lines. Add up to ${AGENDA_MAX_LINES} at a time.`);
+  const tooLong = items.findIndex((t) => t.length > AGENDA_MAX_LEN);
+  if (tooLong !== -1) return fail(`Line ${tooLong + 1} is longer than ${AGENDA_MAX_LEN} characters. Shorten it or split it.`);
+
+  try {
+    const batch = writeBatch(db);
+    const base = Date.now();
+    items.forEach((text, i) => {
+      batch.set(doc(collection(db, "weekAgendas")), {
+        weekStart: wk.start, text, status: AG_STATUS.OPEN, seq: base + i,
+        carriedFrom: "", carriedTo: "", firstWeek: wk.start,
+        rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+        rmEmployeeId: state.profile.employeeId || "",
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    });
+    await batch.commit();
+    toast(items.length === 1 ? "Added to your agenda" : `Added ${items.length} items to your agenda`);
+    $("agenda-text").value = "";
+    await loadWeekAgendas();
+    renderAgenda();
+  } catch (e2) {
+    fail("Couldn't save that. " + (e2.message || ""));
+  }
+});
+
+function renderAgenda() {
+  const wk = agendaWeek();
+  const thisWk = currentWeekStart();
+  const isPast = wk.start < thisWk;
+  $("agenda-range-label").textContent = `${fmtDay(wk.start)} – ${fmtDay(wk.end)}`;
+  $("agenda-form").hidden = isPast;
+  $("agenda-past-note").hidden = !isPast;
+
+  const mine = state.weekAgendas.filter((a) => a.rmEmail === state.user.email);
+  const items = mine.filter((a) => a.weekStart === wk.start).sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  const openHere = items.filter((a) => a.status === AG_STATUS.OPEN);
+
+  // Banner: on an ended week, offer to carry what's open. On the current
+  // week, point back at anything still open from earlier weeks so it
+  // isn't forgotten — nothing moves until the person chooses.
+  const banner = $("agenda-banner");
+  banner.hidden = true; banner.innerHTML = "";
+  if (isPast && openHere.length) {
+    banner.innerHTML = `${openHere.length} item${openHere.length === 1 ? "" : "s"} left open this week.
+      <button type="button" class="btn-link" id="btn-agenda-carry-all">Carry ${openHere.length === 1 ? "it" : "all"} to this week</button>`;
+    banner.hidden = false;
+    $("btn-agenda-carry-all").addEventListener("click", () => carryAgendaItems(openHere.map((a) => a.id)));
+  } else if (wk.start === thisWk) {
+    const stale = mine.filter((a) => a.status === AG_STATUS.OPEN && a.weekStart < thisWk);
+    if (stale.length) {
+      const latest = stale.map((a) => a.weekStart).sort().pop();
+      banner.innerHTML = `${stale.length} item${stale.length === 1 ? "" : "s"} still open from earlier weeks.
+        <button type="button" class="btn-link" id="btn-agenda-review">Review</button>`;
+      banner.hidden = false;
+      $("btn-agenda-review").addEventListener("click", () => {
+        const [y, m, d] = latest.split("-").map(Number);
+        agendaRef = new Date(y, m - 1, d);
+        renderAgenda();
+      });
+    }
+  }
+
+  if (!items.length) {
+    $("agenda-list").innerHTML = `<p class="empty">${isPast ? "Nothing was on the agenda this week." : "Nothing on this week's agenda yet. Add items below."}</p>`;
+    return;
+  }
+  $("agenda-list").innerHTML = items.map((a) => {
+    const open = a.status === AG_STATUS.OPEN, done = a.status === AG_STATUS.DONE;
+    const actions = [
+      open && !isPast ? `<button class="btn-link" data-ag-schedule="${a.id}">Schedule</button>` : "",
+      open && isPast ? `<button class="btn-link" data-ag-carry="${a.id}">Carry to this week</button>` : "",
+      open || done ? `<button class="btn-link" data-ag-toggle="${a.id}">${done ? "Mark open" : "Mark done"}</button>` : "",
+      open || done ? `<button class="btn-link danger" data-ag-delete="${a.id}">Remove</button>` : ""
+    ].join("");
+    const origin = agendaOrigin(a);
+    return `
+    <article class="entry">
+      <div class="entry-top">
+        <span class="entry-name agenda-text${done ? " agenda-done" : ""}">${esc(a.text)}</span>
+        <span class="tag ${agendaTag(a.status)}">${esc(a.status)}</span>
+        ${actions ? `<span class="entry-actions">${actions}</span>` : ""}
+      </div>
+      ${origin ? `<div class="entry-meta">${esc(origin)}</div>` : ""}
+    </article>`;
+  }).join("");
+
+  const list = $("agenda-list");
+  list.querySelectorAll("[data-ag-schedule]").forEach((b) => b.addEventListener("click", () => scheduleAgendaItem(b.dataset.agSchedule)));
+  list.querySelectorAll("[data-ag-carry]").forEach((b) => b.addEventListener("click", () => carryAgendaItems([b.dataset.agCarry])));
+  list.querySelectorAll("[data-ag-toggle]").forEach((b) => b.addEventListener("click", () => toggleAgendaStatus(b.dataset.agToggle)));
+  list.querySelectorAll("[data-ag-delete]").forEach((b) => b.addEventListener("click", () => deleteAgendaItem(b.dataset.agDelete)));
+}
+
+async function toggleAgendaStatus(id) {
+  const a = state.weekAgendas.find((x) => x.id === id);
+  if (!a || a.status === AG_STATUS.CARRIED) return;
+  const next = a.status === AG_STATUS.DONE ? AG_STATUS.OPEN : AG_STATUS.DONE;
+  try {
+    await updateDoc(doc(db, "weekAgendas", id), { status: next, updatedAt: serverTimestamp() });
+    a.status = next;
+    renderAgenda();
+  } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
+}
+
+async function deleteAgendaItem(id) {
+  const a = state.weekAgendas.find((x) => x.id === id);
+  if (!a) return;
+  if (!confirm(`Remove "${a.text}" from your agenda?`)) return;
+  try {
+    await deleteDoc(doc(db, "weekAgendas", id));
+    state.weekAgendas = state.weekAgendas.filter((x) => x.id !== id);
+    renderAgenda();
+  } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
+}
+
+// Copies each still-open item from an ended week into the current week and
+// marks the original Carried, both in one atomic batch per chunk — so an
+// item can never end up in both weeks as Open, or in neither.
+async function carryAgendaItems(ids) {
+  const target = currentWeekStart();
+  const items = ids.map((id) => state.weekAgendas.find((x) => x.id === id))
+    .filter((a) => a && a.status === AG_STATUS.OPEN && a.weekStart < target)
+    .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  if (!items.length) return;
+  try {
+    const base = Date.now();
+    for (let c = 0; c < items.length; c += AGENDA_BATCH_ITEMS) {
+      const batch = writeBatch(db);
+      items.slice(c, c + AGENDA_BATCH_ITEMS).forEach((a, i) => {
+        batch.set(doc(collection(db, "weekAgendas")), {
+          weekStart: target, text: a.text, status: AG_STATUS.OPEN, seq: base + c + i,
+          carriedFrom: a.weekStart, carriedTo: "", firstWeek: a.firstWeek || a.weekStart,
+          rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+          rmEmployeeId: state.profile.employeeId || "",
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        });
+        batch.update(doc(db, "weekAgendas", a.id), { status: AG_STATUS.CARRIED, carriedTo: target, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+    toast(items.length === 1 ? "Carried to this week" : `Carried ${items.length} items to this week`);
+    await loadWeekAgendas();
+    renderAgenda();
+  } catch (e) {
+    toast("Couldn't carry that. " + (e.message || ""));
+    await loadWeekAgendas();   // a partly-finished multi-chunk carry shows as it really is
+    renderAgenda();
+  }
+}
+
+// Once a day firms up: pre-fill the dated plan form below with the item's
+// text as the purpose. The agenda item itself stays Open — one item like
+// "Ankur's Meerut contact meetings" may become several dated meetings.
+function scheduleAgendaItem(id) {
+  const a = state.weekAgendas.find((x) => x.id === id);
+  if (!a) return;
+  const wk = agendaWeek();
+  $("wp-purpose").value = a.text;
+  $("wp-date").value = wk.start > todayISO() ? wk.start : todayISO();
+  $("weeklyplan-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("wp-name").focus({ preventScroll: true });
+  toast("Add who, where and the day, then Add to plan");
+}
+
+// Master → Weekly plan: everyone's agenda for one week, already scoped per
+// role by loadWeekAgendas.
+$("btn-master-agenda-prev").addEventListener("click", () => { masterAgendaRef.setDate(masterAgendaRef.getDate() - 7); renderMasterAgenda(); });
+$("btn-master-agenda-next").addEventListener("click", () => { masterAgendaRef.setDate(masterAgendaRef.getDate() + 7); renderMasterAgenda(); });
+$("btn-master-agenda-today").addEventListener("click", () => { masterAgendaRef = new Date(); renderMasterAgenda(); });
+
+function renderMasterAgenda() {
+  const wk = weekBoundsAround(masterAgendaRef);
+  $("master-agenda-range-label").textContent = `${fmtDay(wk.start)} – ${fmtDay(wk.end)}`;
+  const rows = state.weekAgendas.filter((a) => a.weekStart === wk.start)
+    .sort((a, b) => (a.rmName || a.rmEmail || "").localeCompare(b.rmName || b.rmEmail || "") || (a.seq || 0) - (b.seq || 0));
+  $("master-agenda-count").textContent = `${rows.length} item${rows.length === 1 ? "" : "s"}`;
+  $("tbl-master-agenda").innerHTML = `<thead><tr>
+    <th>RM</th><th>Item</th><th>Status</th><th>History</th>
+    </tr></thead><tbody>${
+      rows.length ? rows.map((a) => `<tr>
+        <td>${esc(a.rmName || a.rmEmail)}</td>
+        <td class="wrap">${esc(a.text)}</td>
+        <td><span class="tag ${agendaTag(a.status)}">${esc(a.status)}</span></td>
+        <td class="wrap">${esc(agendaOrigin(a))}</td></tr>`).join("")
+        : `<tr><td colspan="4" class="empty">Nothing on anyone's agenda this week.</td></tr>`
+    }</tbody>`;
+}
 
 /* ============================ travel plan: filed for approval ============================ */
 const TP_STATUS = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" };
