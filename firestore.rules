@@ -34,6 +34,8 @@ rules_version = '2';
 //    weeklyPlans — who someone intends to meet, before it happens. Same
 //               visibility as meetings: RM own, Team Lead own + reports',
 //               everyone else (including Observer) sees all.
+//    weekAgendas — undated items planned for a week (no fixed day).
+//               Same visibility and write rules as weeklyPlans.
 //    travelPlans — a trip filed for approval. Same visibility shape.
 //               Approval: Team Lead approves their own reports; Admin
 //               and Superadmin approve each other and everyone else —
@@ -264,6 +266,31 @@ service cloud.firestore {
         && request.resource.data.name.size() > 0
         && request.resource.data.personType is string
         && request.resource.data.personType.size() > 0;
+
+      allow update: if isAdminOrAbove()
+        || (canLog() && resource.data.rmEmail == callerEmail() && request.resource.data.rmEmail == callerEmail());
+
+      allow delete: if isAdminOrAbove()
+        || (canLog() && resource.data.rmEmail == callerEmail());
+    }
+
+    // ---------- weekAgendas: undated items planned for a week ----------
+    // One doc per item, keyed to the Monday of its week. Mirrors
+    // weeklyPlans exactly (same visibility, same who-can-write) — only the
+    // create-time field checks differ.
+    match /weekAgendas/{itemId} {
+      allow get, list: if canViewAll()
+        || (isMember() && resource.data.rmEmail == callerEmail())
+        || (isTeamLead() && isMyReport(resource.data.rmEmail));
+
+      allow create: if canLog()
+        && request.resource.data.rmEmail == callerEmail()
+        && request.resource.data.weekStart is string
+        && request.resource.data.weekStart.size() == 10
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.status in ['Open', 'Done'];
 
       allow update: if isAdminOrAbove()
         || (canLog() && resource.data.rmEmail == callerEmail() && request.resource.data.rmEmail == callerEmail());
