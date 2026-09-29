@@ -362,7 +362,7 @@
     <div id="log-panel-weeklyplan" hidden>
       <section class="card agenda-card">
         <div class="card-head">
-          <h2>Week agenda</h2>
+          <h2>Weekly planner</h2>
           <div class="week-nav">
             <button type="button" id="btn-agenda-prev" class="btn-link" title="Previous week">‹</button>
             <span class="card-note" id="agenda-range-label"></span>
@@ -375,10 +375,10 @@
         <form id="agenda-form" class="form agenda-form" novalidate>
           <label class="field">
             <span>Add to this week <em>one item per line, or paste a whole list</em></span>
-            <textarea id="agenda-text" rows="3" placeholder="Things you plan to get done this week, no day needed"></textarea>
+            <textarea id="agenda-text" rows="3" placeholder="Work for this week that isn't a meeting: postings, listings, emails, planning"></textarea>
           </label>
           <p id="agenda-error" class="form-error" hidden></p>
-          <button type="submit" class="btn btn-primary">Add to agenda</button>
+          <button type="submit" class="btn btn-primary">Add to planner</button>
         </form>
         <p id="agenda-past-note" class="agenda-past-note" hidden>This week has ended, so nothing new can be added. Open items can be carried to this week.</p>
       </section>
@@ -390,10 +390,16 @@
             <span class="card-note">Who, where, and why — before it happens</span>
           </div>
           <form id="weeklyplan-form" class="form" novalidate>
+            <p id="wp-move-note" class="dup-warning wp-move-note" hidden></p>
             <label class="field">
-              <span>Date</span>
+              <span id="lbl-wp-date">Date</span>
               <input type="date" id="wp-date" required />
             </label>
+            <label class="check-field">
+              <input type="checkbox" id="wp-tbc" />
+              <span>Day not confirmed yet, plan it for that week</span>
+            </label>
+            <p id="wp-tbc-note" class="wp-tbc-note" hidden></p>
             <label class="field">
               <span>Name</span>
               <input type="text" id="wp-name" placeholder="Who are you planning to meet?" autocomplete="off" required />
@@ -409,7 +415,7 @@
               </label>
             </div>
             <label class="field">
-              <span>Location</span>
+              <span>Location <em id="lbl-wp-locationOptional" hidden>optional until the day is set</em></span>
               <input type="text" id="wp-location" placeholder="Where's this happening?" autocomplete="off" required />
             </label>
             <label class="field">
@@ -423,7 +429,7 @@
 
         <section class="card list-card">
           <div class="card-head">
-            <h2>Your plan</h2>
+            <h2>Meetings scheduled</h2>
             <input type="month" id="weeklyplan-month" class="month-input" />
           </div>
           <div id="weeklyplan-list" class="list"></div>
@@ -513,6 +519,7 @@
       <button class="subtab" data-sub="sheets" role="tab" aria-selected="false">Sheets</button>
       <button class="subtab" data-sub="day" role="tab" aria-selected="false">Day view</button>
       <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
+      <button class="subtab" data-sub="travelplan" role="tab" aria-selected="false">Travel plans</button>
     </nav>
 
     <div id="master-panel-dashboard">
@@ -652,14 +659,14 @@
       </div>
       <section class="card">
         <div class="card-head">
-          <h2>Everyone's weekly plan</h2>
+          <h2>Meetings scheduled</h2>
           <span class="card-note" id="master-weeklyplan-count"></span>
         </div>
         <div class="scroller"><table id="tbl-master-weeklyplan" class="grid"></table></div>
       </section>
-      <section class="card">
+      <section class="card" id="master-agenda-section">
         <div class="card-head">
-          <h2>Everyone's week agenda</h2>
+          <h2>Weekly planner</h2>
           <div class="week-nav">
             <button type="button" id="btn-master-agenda-prev" class="btn-link" title="Previous week">‹</button>
             <span class="card-note" id="master-agenda-range-label"></span>
@@ -669,6 +676,20 @@
           </div>
         </div>
         <div class="scroller"><table id="tbl-master-agenda" class="grid"></table></div>
+      </section>
+    </div>
+
+    <div id="master-panel-travelplan" hidden>
+      <div class="page-head-controls sub-controls">
+        <input type="month" id="master-travelplan-month" class="month-input" />
+        <span class="lede" id="master-travelplan-label"></span>
+      </div>
+      <section class="card">
+        <div class="card-head">
+          <h2>Travel plans</h2>
+          <span class="card-note" id="master-travelplan-count"></span>
+        </div>
+        <div class="scroller"><table id="tbl-master-travelplan" class="grid"></table></div>
       </section>
     </div>
   </main>
