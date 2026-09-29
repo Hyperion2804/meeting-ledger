@@ -238,31 +238,50 @@ Same visibility as everywhere else: your own plan is yours, Team Lead sees
 their reports' too, and Master gets its own **Weekly Plan** sub-tab showing
 everyone's — Admin, Superadmin, and Observer included.
 
-**Week agenda — for things without a fixed day.** At the top of the Weekly
-Plan sub-tab is a list tied to a *week*, not a date: meetings you haven't
-scheduled yet, and work that isn't a meeting at all (postings, listings,
-planning). Type one item per line, or paste a whole numbered list — each
-line becomes its own item and the "1." / "2." numbering is stripped. Use
-‹ › to plan ahead for next week. Each item can be marked Done or removed.
+**The Weekly plan tab has two halves.**
 
-When a day firms up, **Schedule** copies the item's text into the dated
-plan form below as the purpose; add who, where, and the day. The agenda
-item stays Open, since one item ("Meerut contact meetings") can become
-several meetings.
+*Meetings scheduled* (the form on the left and the list beside it) is
+every meeting you're planning. If the day isn't fixed yet, tick **Day not
+confirmed yet** and pick any day in that week: it's saved as "Week of
+28-09-2026 · day TBC", location becomes optional, and a **Set date**
+button appears for when the day firms up (location is asked for then if
+it's still blank). A plan can slip into a later week; setting the date
+moves it. "Log this meeting" works on either kind — a day-TBC plan logs
+as today. Observer sees all meetings scheduled, confirmed or not.
 
-**Nothing moves between weeks on its own.** Once a week ends it's
-read-only, and its open items get a **Carry to this week** button (or
+*Weekly planner* (the card at the top) is for the week's work that isn't a
+meeting — postings, listings, emails, planning. Type one item per line, or
+paste a whole numbered list; each line becomes its own item and the
+"1." / "2." numbering is stripped. Use ‹ › to plan ahead. If a meeting
+lands in the planner, **Move to meetings** opens the meeting form
+pre-filled with the text and "day not confirmed" ticked; the planner item
+is removed only when you save (in the same write, so it's never in both
+or lost). "Keep it in the planner" cancels.
+
+**Nothing in the planner moves between weeks on its own.** Once a week
+ends it's read-only, and its open items get **Carry to this week** (or
 "Carry all"). Carrying marks the original *Carried* — so the old week
 still shows honestly what didn't get done — and puts an Open copy in the
 current week that remembers where it came from and when it was first
 planned. If anything is still open from earlier weeks, the current week
 shows a reminder with a **Review** link.
 
-Same visibility as the Weekly Plan. Master's Weekly Plan sub-tab has an
-**Everyone's week agenda** table with its own week arrows. The agenda is
-stored in its own collection (`weekAgendas`), so publishing the updated
-`firestore.rules` is required. The daily reminder email doesn't include
-agenda items yet.
+**Observer can't see the planner at all** — it's internal working notes,
+and like Leads that's enforced in `firestore.rules`, not just hidden on
+screen. Everyone else sees it with the usual scope (Team Lead: own +
+reports; Admin/Superadmin: everyone) in the **Weekly planner** table on
+Master → Weekly plan, which has its own week arrows. The planner lives in
+its own collection (`weekAgendas`).
+
+**Master → Travel plans** lists every trip in scope for the chosen month
+(a trip shows in every month its dates touch), with status and who
+decided it. View-only — Approve and Reject stay on the Approvals tab.
+Observer can see it.
+
+Reminder emails (when the reminders workflow is deployed) don't include
+planner items. The reminders script also needs a small change before it
+goes live: as written, it would treat a day-TBC meeting's blank date as
+overdue.
 
 **Email is optional now.** Everything else on the form is still required;
 email is checked for a valid format only if something's actually typed.
