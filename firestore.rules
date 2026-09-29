@@ -34,8 +34,9 @@ rules_version = '2';
 //    weeklyPlans — who someone intends to meet, before it happens. Same
 //               visibility as meetings: RM own, Team Lead own + reports',
 //               everyone else (including Observer) sees all.
-//    weekAgendas — undated items planned for a week (no fixed day).
-//               Same visibility and write rules as weeklyPlans.
+//    weekAgendas — the weekly planner: non-meeting work for a week, no
+//               fixed day. Same rules as weeklyPlans, except Observer
+//               can't read it at all.
 //    travelPlans — a trip filed for approval. Same visibility shape.
 //               Approval: Team Lead approves their own reports; Admin
 //               and Superadmin approve each other and everyone else —
@@ -259,9 +260,14 @@ service cloud.firestore {
         || (isMember() && resource.data.rmEmail == callerEmail())
         || (isTeamLead() && isMyReport(resource.data.rmEmail));
 
+      // A plan has either a confirmed day (date) or, with the day still to
+      // be confirmed, an empty date plus the Monday of its week (weekStart).
       allow create: if canLog()
         && request.resource.data.rmEmail == callerEmail()
         && request.resource.data.date is string
+        && (request.resource.data.date.size() == 10
+            || (request.resource.data.get('weekStart', '') is string
+                && request.resource.data.get('weekStart', '').size() == 10))
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.personType is string
@@ -274,12 +280,13 @@ service cloud.firestore {
         || (canLog() && resource.data.rmEmail == callerEmail());
     }
 
-    // ---------- weekAgendas: undated items planned for a week ----------
+    // ---------- weekAgendas: the weekly planner (non-meeting work) ----------
     // One doc per item, keyed to the Monday of its week. Mirrors
-    // weeklyPlans exactly (same visibility, same who-can-write) — only the
-    // create-time field checks differ.
+    // weeklyPlans EXCEPT reads: Observer is excluded entirely (isAdminOrAbove
+    // instead of canViewAll) — the planner is internal working notes, same
+    // reasoning as /leads. Only the create-time field checks also differ.
     match /weekAgendas/{itemId} {
-      allow get, list: if canViewAll()
+      allow get, list: if isAdminOrAbove()
         || (isMember() && resource.data.rmEmail == callerEmail())
         || (isTeamLead() && isMyReport(resource.data.rmEmail));
 
