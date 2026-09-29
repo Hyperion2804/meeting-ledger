@@ -397,10 +397,13 @@ async function loadWeeklyPlans() {
     .sort((x, y) => (x.date || "").localeCompare(y.date || ""));
 }
 
-// Undated week agenda items — same visibility shape as weeklyPlans.
+// Weekly planner items. Same shape as weeklyPlans EXCEPT Observer: the
+// planner is internal working notes, and firestore.rules deny Observer
+// entirely — so don't even ask (a denied query would fail the whole load).
 async function loadWeekAgendas() {
+  if (isObserver()) { state.weekAgendas = []; return; }
   const col = collection(db, "weekAgendas");
-  const q = canViewAll() ? col
+  const q = isAdminOrAbove() ? col
     : isTeamLead() ? query(col, where("rmEmail", "in", scopeEmails()))
     : query(col, where("rmEmail", "==", state.user.email));
   const snap = await getDocs(q);
@@ -1437,78 +1440,191 @@ function startEdit(id) {
 fillSelect($("wp-personType"), OPTIONS.personType, { blank: true });
 $("wp-date").value = todayISO();
 $("weeklyplan-month").value = thisMonth();
+$("wp-tbc").checked = false;
 
 const WP_STATUS = { PLANNED: "Planned", DONE: "Done" };
+
+// A planned meeting either has a confirmed day (date) or is planned for a
+// week with the day still to be confirmed (date "", dateTbc true). Every
+// entry also stores weekStart — the Monday of its week — so both kinds
+// sit in the right week. Entries from before this change have only a
+// date; everything below works from the date when there is one.
+const localDate = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
+const weekOfISO = (iso) => weekBoundsAround(localDate(iso));
+const planWeekStart = (p) => p.date ? weekOfISO(p.date).start : (p.weekStart || "");
+const planWhen = (p) => p.date ? fmtDMY(p.date) : `Week of ${fmtDMY(p.weekStart)} · day TBC`;
+// Month views: a dated plan belongs to its date's month; a day-TBC plan
+// shows in every month its week touches (a week can straddle two).
+function planInMonth(p, m) {
+  if (p.date) return p.date.startsWith(m);
+  if (!p.weekStart) return false;
+  const { from, to } = monthBounds(m);
+  const wk = weekOfISO(p.weekStart);
+  return wk.start <= to && wk.end >= from;
+}
+// Sort: by day; a day-TBC plan goes after everything dated in its week.
+const planSortKey = (p) => p.date ? p.date + "0" : weekOfISO(p.weekStart).end + "1";
+
+let movingAgendaId = null;     // set while a planner item is being moved into this form
+let wpSettingDateId = null;    // the day-TBC entry whose inline "Set date" editor is open
+
+function syncWpTbc() {
+  const tbc = $("wp-tbc").checked;
+  $("lbl-wp-date").textContent = tbc ? "Any day in that week" : "Date";
+  $("lbl-wp-locationOptional").hidden = !tbc;
+  $("wp-location").required = !tbc;
+  const d = $("wp-date").value;
+  $("wp-tbc-note").hidden = !(tbc && d);
+  if (tbc && d) {
+    const wk = weekOfISO(d);
+    $("wp-tbc-note").textContent = `Planned for the week of ${fmtDay(wk.start)} – ${fmtDay(wk.end)}, day to be confirmed.`;
+  }
+}
+$("wp-tbc").addEventListener("change", syncWpTbc);
+$("wp-date").addEventListener("change", syncWpTbc);
+
+function clearMovingAgenda() {
+  movingAgendaId = null;
+  $("wp-move-note").hidden = true;
+  $("wp-move-note").innerHTML = "";
+}
+
+function resetWeeklyPlanForm() {
+  $("weeklyplan-form").reset();
+  $("wp-date").value = todayISO();
+  $("wp-tbc").checked = false;
+  clearMovingAgenda();
+  syncWpTbc();
+}
 
 $("weeklyplan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = $("weeklyplan-error");
   err.hidden = true;
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
 
-  const date = $("wp-date").value;
+  const tbc = $("wp-tbc").checked;
+  const picked = $("wp-date").value;
   const name = $("wp-name").value.trim();
   const personType = $("wp-personType").value;
   const phone = phoneDigitsOf($("wp-phone").value);
   const location = $("wp-location").value.trim();
   const purpose = $("wp-purpose").value.trim();
 
-  if (!date) { err.textContent = "Pick a date."; err.hidden = false; return; }
-  if (!name) { err.textContent = "Add a name."; err.hidden = false; return; }
-  if (!personType) { err.textContent = "Pick a meeting person type."; err.hidden = false; return; }
-  if (!location) { err.textContent = "Add a location."; err.hidden = false; return; }
-  if ($("wp-phone").value && phone.length !== 10) { err.textContent = "Enter a valid 10-digit phone number, or leave it blank."; err.hidden = false; return; }
+  if (!picked) return fail(tbc ? "Pick any day in the week you're planning for." : "Pick a date.");
+  const weekStart = weekOfISO(picked).start;
+  if (tbc && weekStart < currentWeekStart()) return fail("That week has already ended. Pick a day in this week or a later one.");
+  if (!name) return fail("Add a name.");
+  if (!personType) return fail("Pick a meeting person type.");
+  if (!location && !tbc) return fail("Add a location.");
+  if ($("wp-phone").value && phone.length !== 10) return fail("Enter a valid 10-digit phone number, or leave it blank.");
+
+  const data = {
+    date: tbc ? "" : picked, weekStart, dateTbc: tbc,
+    name, personType, phone, location, purpose,
+    status: WP_STATUS.PLANNED,
+    rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+    rmEmployeeId: state.profile.employeeId || "",
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  };
 
   try {
-    await addDoc(collection(db, "weeklyPlans"), {
-      date, name, personType, phone, location, purpose,
-      status: WP_STATUS.PLANNED,
-      rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
-      rmEmployeeId: state.profile.employeeId || "",
-      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-    });
-    toast("Added to your plan");
-    $("weeklyplan-form").reset();
-    $("wp-date").value = todayISO();
-    await loadWeeklyPlans();
+    const moved = movingAgendaId;
+    if (moved) {
+      // Planner → meetings in one atomic write: the meeting is created and
+      // the planner item removed together, so it's never in both or neither.
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, "weeklyPlans")), data);
+      batch.delete(doc(db, "weekAgendas", moved));
+      await batch.commit();
+      toast("Moved to meetings scheduled");
+    } else {
+      await addDoc(collection(db, "weeklyPlans"), data);
+      toast("Added to meetings scheduled");
+    }
+    resetWeeklyPlanForm();
+    await Promise.all([loadWeeklyPlans(), moved ? loadWeekAgendas() : Promise.resolve()]);
     renderWeeklyPlan();
   } catch (e2) {
-    err.textContent = "Couldn't save that. " + (e2.message || "");
-    err.hidden = false;
+    fail("Couldn't save that. " + (e2.message || ""));
   }
 });
 $("weeklyplan-month").addEventListener("change", renderWeeklyPlan);
 
 function renderWeeklyPlan() {
-  renderAgenda();   // the week agenda sits above the dated plan on the same sub-tab
+  renderAgenda();   // the weekly planner sits above the meetings on the same sub-tab
   const m = $("weeklyplan-month").value || thisMonth();
-  const mine = state.weeklyPlans.filter((p) => p.rmEmail === state.user.email && (p.date || "").startsWith(m))
-    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const mine = state.weeklyPlans.filter((p) => p.rmEmail === state.user.email && planInMonth(p, m))
+    .sort((a, b) => planSortKey(a).localeCompare(planSortKey(b)));
 
   if (!mine.length) {
-    $("weeklyplan-list").innerHTML = `<p class="empty">Nothing planned this month yet. Add one on the left.</p>`;
+    $("weeklyplan-list").innerHTML = `<p class="empty">No meetings scheduled this month yet. Add one on the left.</p>`;
     return;
   }
-  $("weeklyplan-list").innerHTML = mine.map((p) => `
+  $("weeklyplan-list").innerHTML = mine.map((p) => {
+    const tbcOpen = !p.date && p.status !== WP_STATUS.DONE;
+    const editing = wpSettingDateId === p.id && tbcOpen;
+    return `
     <article class="entry">
       <div class="entry-top">
         <span class="entry-name">${esc(p.name)}</span>
         <span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span>
         <span class="entry-actions">
+          ${tbcOpen && !editing ? `<button class="btn-link" data-wp-setdate="${p.id}">Set date</button>` : ""}
           ${p.status !== WP_STATUS.DONE ? `<button class="btn-link" data-promote="${p.id}">Log this meeting</button>` : ""}
           <button class="btn-link" data-wp-toggle="${p.id}">${p.status === WP_STATUS.DONE ? "Mark planned" : "Mark done"}</button>
           <button class="btn-link danger" data-wp-delete="${p.id}">Remove</button>
         </span>
       </div>
-      <div class="entry-meta">${esc(fmtDMY(p.date))} · ${esc(p.personType)}${p.phone ? " · " + esc(p.phone) : ""} · ${esc(p.location)}</div>
+      <div class="entry-meta">${esc(planWhen(p))} · ${esc(p.personType)}${p.phone ? " · " + esc(p.phone) : ""}${p.location ? " · " + esc(p.location) : ""}</div>
       ${p.purpose ? `<div class="entry-remarks">${esc(p.purpose)}</div>` : ""}
-    </article>`).join("");
+      ${editing ? `
+      <div class="wp-setdate">
+        <input type="date" id="wp-setdate-date" value="${esc(p.weekStart > todayISO() ? p.weekStart : todayISO())}" />
+        ${p.location ? "" : `<input type="text" id="wp-setdate-location" placeholder="Location" autocomplete="off" />`}
+        <button type="button" class="btn btn-primary btn-sm" id="btn-wp-setdate-save">Save</button>
+        <button type="button" class="btn-link" id="btn-wp-setdate-cancel">Cancel</button>
+        <p id="wp-setdate-error" class="form-error" hidden></p>
+      </div>` : ""}
+    </article>`;
+  }).join("");
 
-  $("weeklyplan-list").querySelectorAll("[data-promote]").forEach((b) =>
+  const list = $("weeklyplan-list");
+  list.querySelectorAll("[data-promote]").forEach((b) =>
     b.addEventListener("click", () => promoteToMeeting(b.dataset.promote)));
-  $("weeklyplan-list").querySelectorAll("[data-wp-toggle]").forEach((b) =>
+  list.querySelectorAll("[data-wp-toggle]").forEach((b) =>
     b.addEventListener("click", () => toggleWeeklyPlanStatus(b.dataset.wpToggle)));
-  $("weeklyplan-list").querySelectorAll("[data-wp-delete]").forEach((b) =>
+  list.querySelectorAll("[data-wp-delete]").forEach((b) =>
     b.addEventListener("click", () => deleteWeeklyPlan(b.dataset.wpDelete)));
+  list.querySelectorAll("[data-wp-setdate]").forEach((b) =>
+    b.addEventListener("click", () => { wpSettingDateId = b.dataset.wpSetdate; renderWeeklyPlan(); }));
+  if ($("btn-wp-setdate-save")) {
+    $("btn-wp-setdate-save").addEventListener("click", () => saveWeeklyPlanDate(wpSettingDateId));
+    $("btn-wp-setdate-cancel").addEventListener("click", () => { wpSettingDateId = null; renderWeeklyPlan(); });
+  }
+}
+
+// Confirms the day on a day-TBC plan. The day can fall outside the week
+// first planned (plans slip) — weekStart follows the new date. Location
+// becomes required now if it was left blank earlier.
+async function saveWeeklyPlanDate(id) {
+  const p = state.weeklyPlans.find((x) => x.id === id);
+  if (!p) return;
+  const err = $("wp-setdate-error");
+  err.hidden = true;
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  const date = $("wp-setdate-date").value;
+  const location = p.location || ($("wp-setdate-location") ? $("wp-setdate-location").value.trim() : "");
+  if (!date) return fail("Pick the day.");
+  if (!location) return fail("Add a location.");
+  const patch = { date, weekStart: weekOfISO(date).start, dateTbc: false, location, updatedAt: serverTimestamp() };
+  try {
+    await updateDoc(doc(db, "weeklyPlans", id), patch);
+    Object.assign(p, patch);
+    wpSettingDateId = null;
+    toast(`Set for ${fmtDMY(date)}`);
+    renderWeeklyPlan();
+  } catch (e) { fail("Couldn't save that. " + (e.message || "")); }
 }
 
 async function toggleWeeklyPlanStatus(id) {
@@ -1536,16 +1652,17 @@ async function deleteWeeklyPlan(id) {
 // Pre-fills the real meeting form from a plan entry, switches to the Log
 // sub-tab so the RM lands on a form ready to finish and save. Marks the
 // plan Done immediately — once you're logging it for real, it's served
-// its purpose as a plan.
+// its purpose as a plan. A day-TBC plan logs as today.
 async function promoteToMeeting(id) {
   const p = state.weeklyPlans.find((x) => x.id === id);
   if (!p) return;
   resetForm();
-  $("f-date").value = p.date > todayISO() ? todayISO() : p.date;
+  const planned = p.date || todayISO();
+  $("f-date").value = planned > todayISO() ? todayISO() : planned;
   $("f-prospectName").value = p.name;
   $("f-personType").value = p.personType;
   if (p.phone) $("f-phone").value = p.phone;
-  $("f-address").value = p.location;
+  $("f-address").value = p.location || "";
   syncLabels();
   toggleContactMode();
 
@@ -1559,11 +1676,11 @@ async function promoteToMeeting(id) {
 }
 
 // The wide view — Team Lead/Admin/Superadmin/Observer, everyone else's
-// plans (already scoped correctly by loadWeeklyPlans per role).
+// meetings scheduled (already scoped correctly by loadWeeklyPlans per role).
 function renderMasterWeeklyPlan() {
   const m = $("master-weeklyplan-month").value || thisMonth();
-  const rows = state.weeklyPlans.filter((p) => (p.date || "").startsWith(m))
-    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const rows = state.weeklyPlans.filter((p) => planInMonth(p, m))
+    .sort((a, b) => planSortKey(a).localeCompare(planSortKey(b)));
 
   const label = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1)
     .toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -1574,12 +1691,12 @@ function renderMasterWeeklyPlan() {
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Phone</th><th>Location</th><th>Purpose</th><th>Status</th>
     </tr></thead><tbody>${
       rows.length ? rows.map((p) => `<tr>
-        <td class="num">${esc(fmtDMY(p.date))}</td><td>${esc(p.rmName || p.rmEmail)}</td>
+        <td class="num">${esc(planWhen(p))}</td><td>${esc(p.rmName || p.rmEmail)}</td>
         <td class="name">${esc(p.name)}</td><td>${esc(p.personType)}</td>
-        <td>${esc(p.phone || "—")}</td><td class="wrap">${esc(p.location)}</td>
+        <td>${esc(p.phone || "—")}</td><td class="wrap">${esc(p.location || "—")}</td>
         <td class="wrap">${esc(p.purpose || "")}</td>
         <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>`).join("")
-        : `<tr><td colspan="8" class="empty">Nothing planned this month.</td></tr>`
+        : `<tr><td colspan="8" class="empty">No meetings scheduled this month.</td></tr>`
     }</tbody>`;
   renderMasterAgenda();
 }
@@ -1652,7 +1769,7 @@ $("agenda-form").addEventListener("submit", async (e) => {
       });
     });
     await batch.commit();
-    toast(items.length === 1 ? "Added to your agenda" : `Added ${items.length} items to your agenda`);
+    toast(items.length === 1 ? "Added to your planner" : `Added ${items.length} items to your planner`);
     $("agenda-text").value = "";
     await loadWeekAgendas();
     renderAgenda();
@@ -1699,13 +1816,13 @@ function renderAgenda() {
   }
 
   if (!items.length) {
-    $("agenda-list").innerHTML = `<p class="empty">${isPast ? "Nothing was on the agenda this week." : "Nothing on this week's agenda yet. Add items below."}</p>`;
+    $("agenda-list").innerHTML = `<p class="empty">${isPast ? "Nothing was in the planner this week." : "Nothing in this week's planner yet. Add items below."}</p>`;
     return;
   }
   $("agenda-list").innerHTML = items.map((a) => {
     const open = a.status === AG_STATUS.OPEN, done = a.status === AG_STATUS.DONE;
     const actions = [
-      open && !isPast ? `<button class="btn-link" data-ag-schedule="${a.id}">Schedule</button>` : "",
+      open && !isPast ? `<button class="btn-link" data-ag-move="${a.id}">Move to meetings</button>` : "",
       open && isPast ? `<button class="btn-link" data-ag-carry="${a.id}">Carry to this week</button>` : "",
       open || done ? `<button class="btn-link" data-ag-toggle="${a.id}">${done ? "Mark open" : "Mark done"}</button>` : "",
       open || done ? `<button class="btn-link danger" data-ag-delete="${a.id}">Remove</button>` : ""
@@ -1723,7 +1840,7 @@ function renderAgenda() {
   }).join("");
 
   const list = $("agenda-list");
-  list.querySelectorAll("[data-ag-schedule]").forEach((b) => b.addEventListener("click", () => scheduleAgendaItem(b.dataset.agSchedule)));
+  list.querySelectorAll("[data-ag-move]").forEach((b) => b.addEventListener("click", () => moveAgendaToMeetings(b.dataset.agMove)));
   list.querySelectorAll("[data-ag-carry]").forEach((b) => b.addEventListener("click", () => carryAgendaItems([b.dataset.agCarry])));
   list.querySelectorAll("[data-ag-toggle]").forEach((b) => b.addEventListener("click", () => toggleAgendaStatus(b.dataset.agToggle)));
   list.querySelectorAll("[data-ag-delete]").forEach((b) => b.addEventListener("click", () => deleteAgendaItem(b.dataset.agDelete)));
@@ -1743,7 +1860,7 @@ async function toggleAgendaStatus(id) {
 async function deleteAgendaItem(id) {
   const a = state.weekAgendas.find((x) => x.id === id);
   if (!a) return;
-  if (!confirm(`Remove "${a.text}" from your agenda?`)) return;
+  if (!confirm(`Remove "${a.text}" from your planner?`)) return;
   try {
     await deleteDoc(doc(db, "weekAgendas", id));
     state.weekAgendas = state.weekAgendas.filter((x) => x.id !== id);
@@ -1786,18 +1903,28 @@ async function carryAgendaItems(ids) {
   }
 }
 
-// Once a day firms up: pre-fill the dated plan form below with the item's
-// text as the purpose. The agenda item itself stays Open — one item like
-// "Ankur's Meerut contact meetings" may become several dated meetings.
-function scheduleAgendaItem(id) {
+// A meeting that landed in the planner belongs in Meetings scheduled,
+// where Observer can see it. Pre-fills the meeting form with the item's
+// text as the purpose and "day not confirmed" ticked for that week; the
+// planner item is removed only when the meeting is saved (same atomic
+// write), and "Keep it in the planner" cancels the move.
+function moveAgendaToMeetings(id) {
   const a = state.weekAgendas.find((x) => x.id === id);
   if (!a) return;
+  resetWeeklyPlanForm();
   const wk = agendaWeek();
   $("wp-purpose").value = a.text;
+  $("wp-tbc").checked = true;
   $("wp-date").value = wk.start > todayISO() ? wk.start : todayISO();
+  syncWpTbc();
+  movingAgendaId = id;
+  $("wp-move-note").innerHTML = `Moving “${esc(a.text)}” from your planner. It leaves the planner once you save this meeting.
+    <button type="button" class="btn-link" id="btn-wp-move-cancel">Keep it in the planner</button>`;
+  $("wp-move-note").hidden = false;
+  $("btn-wp-move-cancel").addEventListener("click", resetWeeklyPlanForm);
   $("weeklyplan-form").scrollIntoView({ behavior: "smooth", block: "start" });
   $("wp-name").focus({ preventScroll: true });
-  toast("Add who, where and the day, then Add to plan");
+  toast("Add who you're meeting, then save");
 }
 
 // Master → Weekly plan: everyone's agenda for one week, already scoped per
@@ -1807,6 +1934,8 @@ $("btn-master-agenda-next").addEventListener("click", () => { masterAgendaRef.se
 $("btn-master-agenda-today").addEventListener("click", () => { masterAgendaRef = new Date(); renderMasterAgenda(); });
 
 function renderMasterAgenda() {
+  $("master-agenda-section").hidden = isObserver();   // Observer never sees the planner
+  if (isObserver()) return;
   const wk = weekBoundsAround(masterAgendaRef);
   $("master-agenda-range-label").textContent = `${fmtDay(wk.start)} – ${fmtDay(wk.end)}`;
   const rows = state.weekAgendas.filter((a) => a.weekStart === wk.start)
@@ -1820,7 +1949,7 @@ function renderMasterAgenda() {
         <td class="wrap">${esc(a.text)}</td>
         <td><span class="tag ${agendaTag(a.status)}">${esc(a.status)}</span></td>
         <td class="wrap">${esc(agendaOrigin(a))}</td></tr>`).join("")
-        : `<tr><td colspan="4" class="empty">Nothing on anyone's agenda this week.</td></tr>`
+        : `<tr><td colspan="4" class="empty">Nothing in anyone's planner this week.</td></tr>`
     }</tbody>`;
 }
 
@@ -1884,6 +2013,35 @@ function renderTravelPlan() {
       ${p.status !== TP_STATUS.PENDING && p.approvedByName ? `<div class="entry-remarks">${esc(p.status)} by ${esc(p.approvedByName)}</div>` : ""}
     </article>`).join("");
 }
+
+// Master → Travel plans: view-only, every trip in scope (Team Lead: own +
+// reports; Admin/Superadmin/Observer: everyone — loadTravelPlans already
+// scopes it). A trip shows in every month its dates touch. Approve and
+// Reject stay on the Approvals tab.
+function renderMasterTravelPlan() {
+  const m = $("master-travelplan-month").value || thisMonth();
+  const { from, to } = monthBounds(m);
+  const rows = state.travelPlans
+    .filter((p) => (p.fromDate || "") <= to && (p.toDate || p.fromDate || "") >= from)
+    .sort((a, b) => (a.fromDate || "").localeCompare(b.fromDate || "") || (a.rmName || "").localeCompare(b.rmName || ""));
+
+  $("master-travelplan-label").textContent = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1)
+    .toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  $("master-travelplan-count").textContent = `${rows.length} trip${rows.length === 1 ? "" : "s"}`;
+  $("tbl-master-travelplan").innerHTML = `<thead><tr>
+    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Meetings</th><th>Events</th><th>Remarks</th><th>Status</th><th>Decided by</th>
+    </tr></thead><tbody>${
+      rows.length ? rows.map((p) => `<tr>
+        <td>${esc(p.rmName || p.rmEmail)}</td><td class="name">${esc(p.destination)}</td>
+        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
+        <td class="num">${p.meetingsPlanned ?? 0}</td><td class="num">${p.eventsPlanned || 0}</td>
+        <td class="wrap">${esc(p.remarks || "")}</td>
+        <td>${tpStatusTag(p.status)}</td><td>${esc(p.status !== TP_STATUS.PENDING ? (p.approvedByName || "") : "")}</td></tr>`).join("")
+        : `<tr><td colspan="9" class="empty">No trips this month.</td></tr>`
+    }</tbody>`;
+}
+$("master-travelplan-month").value = thisMonth();
+$("master-travelplan-month").addEventListener("change", renderMasterTravelPlan);
 
 /* ============================ approvals: Team Lead / Admin / Superadmin ============================ */
 // Who this person can act on: Admin/Superadmin see and can decide on
@@ -2271,8 +2429,10 @@ $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("master-panel-sheets").hidden = masterSub !== "sheets";
     $("master-panel-day").hidden = masterSub !== "day";
     $("master-panel-weeklyplan").hidden = masterSub !== "weeklyplan";
+    $("master-panel-travelplan").hidden = masterSub !== "travelplan";
     if (masterSub === "day") renderDayView();
     if (masterSub === "weeklyplan") renderMasterWeeklyPlan();
+    if (masterSub === "travelplan") renderMasterTravelPlan();
   }));
 
 $("day-view-date").value = todayISO();
