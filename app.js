@@ -1972,6 +1972,8 @@ function renderMasterAgenda() {
 // carried (the original is marked Carried, the copy remembers its day).
 // Private: firestore.rules let only the owning Superadmin read or write.
 let dayRef = todayISO();   // day on screen, YYYY-MM-DD
+let dtCompletingId = null; // task whose "what was done" box is open
+const DT_NOTE_MAX = 1000;
 // Day navigation uses the existing addDaysISO() helper (defined further
 // down, near Plan vs Achievement) — same local-date arithmetic.
 
@@ -2056,7 +2058,8 @@ function renderDayPlan() {
     const open = t.status === AG_STATUS.OPEN, done = t.status === AG_STATUS.DONE;
     const actions = [
       open && isPast ? `<button class="btn-link" data-dt-carry="${t.id}">Carry to today</button>` : "",
-      open || done ? `<button class="btn-link" data-dt-toggle="${t.id}">${done ? "Mark open" : "Mark done"}</button>` : "",
+      open && dtCompletingId !== t.id ? `<button class="btn-link" data-dt-done="${t.id}">Mark done</button>` : "",
+      done ? `<button class="btn-link" data-dt-toggle="${t.id}">Mark open</button>` : "",
       open || done ? `<button class="btn-link danger" data-dt-delete="${t.id}">Remove</button>` : ""
     ].join("");
     const origin = dayOrigin(t);
@@ -2068,22 +2071,100 @@ function renderDayPlan() {
         ${actions ? `<span class="entry-actions">${actions}</span>` : ""}
       </div>
       ${origin ? `<div class="entry-meta">${esc(origin)}</div>` : ""}
+      ${t.fromTaskText ? `<div class="entry-meta">Next step from: ${esc(t.fromTaskText)}</div>` : ""}
+      ${done && t.doneNote ? `<div class="entry-remarks"><strong>Done:</strong> ${esc(t.doneNote)}</div>` : ""}
+      ${done && t.nextStep ? `<div class="entry-meta">Next step → ${esc(fmtDay(t.nextStepDay))}: ${esc(t.nextStep)}</div>` : ""}
+      ${open && dtCompletingId === t.id ? `
+      <div class="dt-complete">
+        <label class="field">
+          <span>What was done</span>
+          <textarea id="dt-done-note" rows="2" placeholder="What happened, what was agreed"></textarea>
+        </label>
+        <div class="dt-next-row">
+          <label class="field">
+            <span>Next step <em>optional</em></span>
+            <input type="text" id="dt-next-text" placeholder="The follow-on task, if any" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>For</span>
+            <input type="date" id="dt-next-day" value="${dayRef > todayISO() ? dayRef : todayISO()}" min="${todayISO()}" />
+          </label>
+        </div>
+        <p id="dt-complete-error" class="form-error" hidden></p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-dt-complete-save">Mark done</button>
+          <button type="button" class="btn-link" id="btn-dt-complete-cancel">Cancel</button>
+        </div>
+      </div>` : ""}
     </article>`;
   }).join("");
 
   const list = $("dayplan-list");
+  list.querySelectorAll("[data-dt-done]").forEach((b) => b.addEventListener("click", () => {
+    dtCompletingId = b.dataset.dtDone; renderDayPlan(); $("dt-done-note").focus();
+  }));
+  if ($("btn-dt-complete-save")) {
+    $("btn-dt-complete-save").addEventListener("click", () => completeDayTask(dtCompletingId));
+    $("btn-dt-complete-cancel").addEventListener("click", () => { dtCompletingId = null; renderDayPlan(); });
+  }
   list.querySelectorAll("[data-dt-carry]").forEach((b) => b.addEventListener("click", () => carryDayTasks([b.dataset.dtCarry])));
   list.querySelectorAll("[data-dt-toggle]").forEach((b) => b.addEventListener("click", () => toggleDayTask(b.dataset.dtToggle)));
   list.querySelectorAll("[data-dt-delete]").forEach((b) => b.addEventListener("click", () => deleteDayTask(b.dataset.dtDelete)));
 }
 
+// Marking done always records what was done. An optional next step is
+// created as a new task on the chosen day (today or later) in the SAME
+// write, so a task is never Done without its next step, or vice versa.
+async function completeDayTask(id) {
+  const t = state.dayTasks.find((x) => x.id === id);
+  if (!t || t.status !== AG_STATUS.OPEN) return;
+  const err = $("dt-complete-error");
+  err.hidden = true;
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  const note = $("dt-done-note").value.trim();
+  const nextText = $("dt-next-text").value.trim();
+  const nextDay = $("dt-next-day").value;
+  if (!note) return fail("Add what was done before marking this done.");
+  if (note.length > DT_NOTE_MAX) return fail(`Keep "what was done" under ${DT_NOTE_MAX} characters.`);
+  if (nextText) {
+    if (nextText.length > AGENDA_MAX_LEN) return fail(`Keep the next step under ${AGENDA_MAX_LEN} characters.`);
+    if (!nextDay) return fail("Pick a day for the next step.");
+    if (nextDay < todayISO()) return fail("The next step can be for today or a later day.");
+  }
+  const patch = {
+    status: AG_STATUS.DONE, doneNote: note,
+    nextStep: nextText, nextStepDay: nextText ? nextDay : "",
+    updatedAt: serverTimestamp()
+  };
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, "dayTasks", id), patch);
+    if (nextText) {
+      batch.set(doc(collection(db, "dayTasks")), {
+        day: nextDay, text: nextText, status: AG_STATUS.OPEN, seq: Date.now(),
+        carriedFrom: "", carriedTo: "", firstDay: nextDay,
+        fromTaskId: id, fromTaskText: t.text,
+        ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    }
+    await batch.commit();
+    dtCompletingId = null;
+    toast(nextText ? `Done. Next step added for ${fmtDay(nextDay)}` : "Marked done");
+    await loadDayTasks();
+    renderDayPlan();
+  } catch (e) { fail("Couldn't save that. " + (e.message || "")); }
+}
+
+// Reopening clears the done note; a next step already created stays, as
+// it's a task in its own right by then.
 async function toggleDayTask(id) {
   const t = state.dayTasks.find((x) => x.id === id);
-  if (!t || t.status === AG_STATUS.CARRIED) return;
-  const next = t.status === AG_STATUS.DONE ? AG_STATUS.OPEN : AG_STATUS.DONE;
+  if (!t || t.status !== AG_STATUS.DONE) return;
+  const patch = { status: AG_STATUS.OPEN, doneNote: "", nextStep: "", nextStepDay: "", updatedAt: serverTimestamp() };
   try {
-    await updateDoc(doc(db, "dayTasks", id), { status: next, updatedAt: serverTimestamp() });
-    t.status = next;
+    await updateDoc(doc(db, "dayTasks", id), patch);
+    Object.assign(t, patch);
     renderDayPlan();
   } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
 }
@@ -2114,6 +2195,7 @@ async function carryDayTasks(ids) {
         batch.set(doc(collection(db, "dayTasks")), {
           day: target, text: t.text, status: AG_STATUS.OPEN, seq: base + c + i,
           carriedFrom: t.day, carriedTo: "", firstDay: t.firstDay || t.day,
+          fromTaskId: t.fromTaskId || "", fromTaskText: t.fromTaskText || "",
           ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
@@ -2348,8 +2430,96 @@ $("btn-week-prev").addEventListener("click", () => { followupsRef.setDate(follow
 $("btn-week-next").addEventListener("click", () => { followupsRef.setDate(followupsRef.getDate() + 7); renderLog(); });
 $("btn-week-today").addEventListener("click", () => { followupsRef = new Date(); renderLog(); });
 
+
+/* ============================ follow-up status ============================ */
+// A meeting counts as followed up once ANY later meeting is logged with the
+// same phone number — early follow-ups count too. (Two meetings with one
+// phone can't share a date: the doc ID is date_phone.) Worked out from
+// whatever meetings this person can see, so RM, Team Lead, Admin,
+// Superadmin and Observer each see the same answer for the rows they see.
+function followUpIndex() {
+  const idx = new Map();
+  for (const m of state.meetings) {
+    const p = phoneDigitsOf(m.phone);
+    if (!p || !m.date) continue;
+    if (!idx.has(p)) idx.set(p, []);
+    idx.get(p).push(m.date);
+  }
+  for (const dates of idx.values()) dates.sort();
+  return idx;
+}
+// Earliest meeting date with this phone after r's own date, or "".
+function followedUpOn(r, idx) {
+  const dates = idx.get(phoneDigitsOf(r.phone)) || [];
+  return dates.find((d) => d > (r.date || "")) || "";
+}
+function followUpStatusHtml(r, idx) {
+  if (!r.followUpDate) return "";
+  const done = followedUpOn(r, idx);
+  if (done) return `<span class="fu-status fu-status-done">✓ Followed up ${esc(fmtDMY(done))}</span>`;
+  if (r.followUpDate < todayISO()) return `<span class="fu-status fu-status-overdue">Overdue</span>`;
+  return "";
+}
+function followUpCell(r, idx) {
+  return `${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}${followUpStatusHtml(r, idx)}`;
+}
+
+// "Log follow-up": opens the meeting form as a NEW Follow-up meeting with
+// the person's details carried over from the original. Only who-they-are
+// fields come across; everything describing the conversation itself
+// (mode, result, reason, lead/docs, next follow-up date, remarks) starts
+// blank so old answers never slip into the new record. The original
+// meeting isn't touched.
+async function logFollowUp(meetingId) {
+  const r = state.meetings.find((x) => x.id === meetingId);
+  if (!r) return;
+  resetForm();
+  document.querySelector('#log-subtabs [data-sub="log"]').click();
+  $("f-date").value = todayISO();
+  $("f-personType").value = r.personType || "";
+  $("f-meetingType").value = "Follow-up";
+  $("f-source").value = r.source || "";
+  $("f-sourceOther").value = r.sourceOther || "";
+  $("f-referenceName").value = r.referenceName || "";
+  if (r.sourceContactId) {
+    resolvedSourceContact = { id: r.sourceContactId, name: r.sourceContactName || "" };
+    $("f-sourceContactId").value = r.sourceContactId.split("-")[1] || "";
+  }
+  syncLabels();
+  toggleReferenceField();
+  toggleSourceContactField();
+  toggleSourceOtherField();
+  toggleNotInterestedField();
+  toggleSharedProgressed();
+
+  const wmcp = r.personType === "Wealth Manager" || r.personType === "Channel Partner";
+  contactModeTouched = true;
+  if (wmcp && r.contactId) {
+    // Same registered contact, looked up live so it reflects the registry
+    // as it is now (and fails clearly if the contact was removed).
+    $("f-contactMode").value = "Existing";
+    $("f-contactId").value = r.contactId.split("-")[1] || "";
+    toggleContactMode();
+    await lookupContact();
+  } else {
+    // Investors, and older WM/CP meetings with no registry link (e.g. from
+    // the Excel import): carry the details over as typed.
+    $("f-contactMode").value = "New";
+    toggleContactMode();
+    $("f-prospectName").value = r.prospectName || "";
+    $("f-phone").value = r.phone || "";
+    $("f-email").value = r.email || "";
+    $("f-address").value = r.address || "";
+  }
+  toggleLeadsSection();
+  checkDuplicateFirstMeeting();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  toast(`Logging a follow-up with ${r.prospectName}. Add how it went and save.`);
+}
+
 function renderFollowups(mine) {
   const { start, end } = weekBoundsAround(followupsRef);
+  const fuIdx = followUpIndex();
   $("followups-range-label").textContent = `${fmtDay(start)} – ${fmtDay(end)}`;
 
   // Two sources: a meeting's own follow-up date, and any pending lead's
@@ -2357,7 +2527,7 @@ function renderFollowups(mine) {
   const fromMeetings = mine
     .filter((r) => r.followUpDate && r.followUpDate >= start && r.followUpDate <= end)
     .map((r) => ({
-      kind: "meeting", date: r.followUpDate, name: r.prospectName,
+      kind: "meeting", id: r.id, followedUp: followedUpOn(r, fuIdx), date: r.followUpDate, name: r.prospectName,
       meta: `${r.personType}${r.phone ? " · " + r.phone : ""}`, note: r.remarks || "",
       rescheduledFrom: r.followUpDateOriginal || ""
     }));
@@ -2383,7 +2553,12 @@ function renderFollowups(mine) {
       </div>
       <div class="fu-meta">${esc(f.meta)}${f.note ? " · " + esc(f.note) : ""}</div>
       ${f.rescheduledFrom ? `<div class="reschedule-note">Rescheduled from ${esc(fmtDay(f.rescheduledFrom))} → ${esc(fmtDay(f.date))}</div>` : ""}
+      ${f.kind === "meeting" ? (f.followedUp
+        ? `<div class="fu-status fu-status-done">✓ Followed up ${esc(fmtDMY(f.followedUp))}</div>`
+        : `<div><button type="button" class="btn-link" data-fu-log="${f.id}">Log follow-up</button></div>`) : ""}
     </article>`).join("");
+  $("followups-list").querySelectorAll("[data-fu-log]").forEach((b) =>
+    b.addEventListener("click", () => logFollowUp(b.dataset.fuLog)));
 }
 
 /* ============================ RM: my history sub-tab ============================ */
@@ -2440,6 +2615,7 @@ function renderHistory(mine) {
   $("history-sub").textContent = `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"}.`;
   $("history-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
 
+  const fuIdx = followUpIndex();
   $("tbl-history").innerHTML = `<thead><tr>
     <th>Date</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th><th>Source</th><th>Result</th>
@@ -2451,7 +2627,7 @@ function renderHistory(mine) {
         <td>${esc(r.phone || "")}</td><td>${esc(r.email || "")}</td><td class="wrap">${esc(r.address || "")}</td>
         <td>${esc(sourceDetail(r))}</td><td>${resultTag(r.result)}</td>
         <td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
+        <td class="num">${followUpCell(r, fuIdx)}</td>
         <td class="wrap">${esc(r.remarks || "")}</td>
         <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
@@ -2903,6 +3079,7 @@ function renderMaster() {
   /* --- every meeting (respects the active chips) --- */
   $("all-count").textContent = `${filteredRows.length} row${filteredRows.length === 1 ? "" : "s"}`;
   const sorted = [...filteredRows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const fuIdx = followUpIndex();
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
@@ -2915,7 +3092,7 @@ function renderMaster() {
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
+        <td class="num">${followUpCell(r, fuIdx)}</td>
         <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
         : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
@@ -2999,6 +3176,7 @@ function renderDayView() {
   const dayAllRows = dayTypeFilter === "all" ? onDay : onDay.filter((r) => r.personType === dayTypeFilter);
   const sorted = [...dayAllRows].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
   $("day-all-count").textContent = `${sorted.length} row${sorted.length === 1 ? "" : "s"}`;
+  const fuIdx = followUpIndex();
   $("tbl-day-all").innerHTML = `<thead><tr>
     <th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
     <th>Phone</th><th>Email</th><th>Address</th>
@@ -3011,7 +3189,7 @@ function renderDayView() {
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
         <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${esc(fmtDMY(r.followUpDate))}${r.followUpDateOriginal ? ` <span class="reschedule-note">(was ${esc(fmtDMY(r.followUpDateOriginal))})</span>` : ""}</td>
+        <td class="num">${followUpCell(r, fuIdx)}</td>
         <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
         : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
