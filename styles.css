@@ -616,3 +616,15 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 
 /* ---------------- day planner (Superadmin) ---------------- */
 .card-head h2 .card-note{font-style:normal;font-family:var(--f-ui);font-weight:400;margin-left:6px}
+
+/* ---------------- follow-up status ---------------- */
+.fu-status{display:inline-block;margin-left:6px;font-family:var(--f-ui);font-size:11.5px;font-weight:600;white-space:nowrap}
+div.fu-status{margin-left:0}
+.fu-status-done{color:var(--green)}
+.fu-status-overdue{color:var(--amber)}
+
+/* ---------------- day planner: done note + next step ---------------- */
+.dt-complete{display:grid;gap:10px;margin-top:6px;padding:12px;background:var(--paper);border:1px solid var(--rule-soft);border-radius:8px}
+.dt-next-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
+.dt-next-row input[type="date"]{font-family:var(--f-data);font-size:13px}
+@media (max-width:600px){ .dt-next-row{grid-template-columns:1fr} }
