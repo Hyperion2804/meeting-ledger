@@ -613,3 +613,6 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 .wp-setdate input{width:auto;font-size:13px;padding:6px 9px}
 .wp-setdate input[type="date"]{font-family:var(--f-data)}
 .wp-setdate .form-error{flex-basis:100%;margin:0}
+
+/* ---------------- day planner (Superadmin) ---------------- */
+.card-head h2 .card-note{font-style:normal;font-family:var(--f-ui);font-weight:400;margin-left:6px}
