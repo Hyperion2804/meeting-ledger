@@ -273,6 +273,17 @@ reports; Admin/Superadmin: everyone) in the **Weekly planner** table on
 Master → Weekly plan, which has its own week arrows. The planner lives in
 its own collection (`weekAgendas`).
 
+**Day planner (Superadmin only, private).** Superadmins get a **Day
+planner** sub-tab under My meetings: a task list for one day at a time.
+Paste a list or add tasks one by one, mark them done, use ‹ › to move
+between days. Past days are read-only; open tasks get **Carry to today**
+(same honest-record carry as the weekly planner), and today shows a
+reminder if anything is still open from earlier days. It is completely
+private: `firestore.rules` let only the Superadmin who wrote a task read
+or change it. Not other Superadmins, not Admin, not Observer, and it
+appears in no Master view or export. If someone stops being a Superadmin,
+they lose access to their own day planner too. Stored in `dayTasks`.
+
 **Master → Travel plans** lists every trip in scope for the chosen month
 (a trip shows in every month its dates touch), with status and who
 decided it. View-only — Approve and Reject stay on the Approvals tab.
