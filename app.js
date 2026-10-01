@@ -1972,7 +1972,8 @@ function renderMasterAgenda() {
 // carried (the original is marked Carried, the copy remembers its day).
 // Private: firestore.rules let only the owning Superadmin read or write.
 let dayRef = todayISO();   // day on screen, YYYY-MM-DD
-const addDaysISO = (iso, n) => { const d = localDate(iso); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+// Day navigation uses the existing addDaysISO() helper (defined further
+// down, near Plan vs Achievement) — same local-date arithmetic.
 
 function dayOrigin(t) {
   if (t.status === AG_STATUS.CARRIED && t.carriedTo) return `Carried to ${fmtDMY(t.carriedTo)}`;
