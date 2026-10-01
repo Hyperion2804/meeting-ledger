@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], weekAgendas: [], travelPlans: [], reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], weekAgendas: [], dayTasks: [], travelPlans: [], reportEmails: [], page: null, editingId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -320,6 +320,7 @@ function buildTabs() {
     : isObserver()
     ? [["master", "Master"], ["team", "Team"], ["contacts", "Contacts"]]
     : [["log", "My meetings"], ["contacts", "Contacts"]];
+  $("subtab-dayplan").hidden = !isSuperAdmin();   // Day planner: Superadmin only
   $("tabs").innerHTML = tabs.map(([id, label]) =>
     `<button class="tab" role="tab" data-page="${id}" aria-selected="false">${label}</button>`).join("");
   $("tabs").querySelectorAll(".tab").forEach((b) =>
@@ -348,6 +349,7 @@ async function loadAll() {
     loadLeads(),
     loadWeeklyPlans(),
     loadWeekAgendas(),
+    loadDayTasks(),
     loadTravelPlans(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
@@ -408,6 +410,15 @@ async function loadWeekAgendas() {
     : query(col, where("rmEmail", "==", state.user.email));
   const snap = await getDocs(q);
   state.weekAgendas = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Superadmin's private day planner. Rules allow only a Superadmin to read
+// their OWN tasks (no one else, not even other Superadmins), so nobody
+// else even asks — and the query must filter by owner to be allowed.
+async function loadDayTasks() {
+  if (!isSuperAdmin()) { state.dayTasks = []; return; }
+  const snap = await getDocs(query(collection(db, "dayTasks"), where("ownerEmail", "==", state.user.email)));
+  state.dayTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 async function loadTravelPlans() {
@@ -1953,6 +1964,170 @@ function renderMasterAgenda() {
     }</tbody>`;
 }
 
+
+/* ============================ day planner: Superadmin only, private ============================ */
+// A Superadmin's own task list for a single day. Same mechanics as the
+// weekly planner, keyed to a date instead of a week: paste a list, mark
+// done, past days are read-only, and open tasks move to today only when
+// carried (the original is marked Carried, the copy remembers its day).
+// Private: firestore.rules let only the owning Superadmin read or write.
+let dayRef = todayISO();   // day on screen, YYYY-MM-DD
+const addDaysISO = (iso, n) => { const d = localDate(iso); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+
+function dayOrigin(t) {
+  if (t.status === AG_STATUS.CARRIED && t.carriedTo) return `Carried to ${fmtDMY(t.carriedTo)}`;
+  if (!t.carriedFrom) return "";
+  const first = t.firstDay && t.firstDay !== t.carriedFrom ? ` · first planned ${fmtDMY(t.firstDay)}` : "";
+  return `Carried from ${fmtDMY(t.carriedFrom)}${first}`;
+}
+
+$("btn-dayplan-prev").addEventListener("click", () => { dayRef = addDaysISO(dayRef, -1); renderDayPlan(); });
+$("btn-dayplan-next").addEventListener("click", () => { dayRef = addDaysISO(dayRef, 1); renderDayPlan(); });
+$("btn-dayplan-today").addEventListener("click", () => { dayRef = todayISO(); renderDayPlan(); });
+
+$("dayplan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("dayplan-error");
+  err.hidden = true;
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  if (!isSuperAdmin()) return fail("Only a Superadmin can use the day planner.");
+  if (dayRef < todayISO()) return fail("That day has passed. Add tasks to today or a later day.");
+  const items = parseAgendaLines($("dayplan-text").value);
+  if (!items.length) return fail("Type at least one task.");
+  if (items.length > AGENDA_MAX_LINES) return fail(`That's ${items.length} lines. Add up to ${AGENDA_MAX_LINES} at a time.`);
+  const tooLong = items.findIndex((t) => t.length > AGENDA_MAX_LEN);
+  if (tooLong !== -1) return fail(`Line ${tooLong + 1} is longer than ${AGENDA_MAX_LEN} characters. Shorten it or split it.`);
+  try {
+    const batch = writeBatch(db);
+    const base = Date.now();
+    items.forEach((text, i) => {
+      batch.set(doc(collection(db, "dayTasks")), {
+        day: dayRef, text, status: AG_STATUS.OPEN, seq: base + i,
+        carriedFrom: "", carriedTo: "", firstDay: dayRef,
+        ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    });
+    await batch.commit();
+    toast(items.length === 1 ? "Task added" : `Added ${items.length} tasks`);
+    $("dayplan-text").value = "";
+    await loadDayTasks();
+    renderDayPlan();
+  } catch (e2) {
+    fail("Couldn't save that. " + (e2.message || ""));
+  }
+});
+
+function renderDayPlan() {
+  const today = todayISO();
+  const isPast = dayRef < today;
+  $("dayplan-range-label").textContent = fmtDay(dayRef) + (dayRef === today ? " · Today" : "");
+  $("dayplan-form").hidden = isPast;
+  $("dayplan-past-note").hidden = !isPast;
+
+  const mine = state.dayTasks.filter((t) => t.ownerEmail === state.user.email);
+  const items = mine.filter((t) => t.day === dayRef).sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  const openHere = items.filter((t) => t.status === AG_STATUS.OPEN);
+
+  const banner = $("dayplan-banner");
+  banner.hidden = true; banner.innerHTML = "";
+  if (isPast && openHere.length) {
+    banner.innerHTML = `${openHere.length} task${openHere.length === 1 ? "" : "s"} left open this day.
+      <button type="button" class="btn-link" id="btn-dayplan-carry-all">Carry ${openHere.length === 1 ? "it" : "all"} to today</button>`;
+    banner.hidden = false;
+    $("btn-dayplan-carry-all").addEventListener("click", () => carryDayTasks(openHere.map((t) => t.id)));
+  } else if (dayRef === today) {
+    const stale = mine.filter((t) => t.status === AG_STATUS.OPEN && t.day < today);
+    if (stale.length) {
+      const latest = stale.map((t) => t.day).sort().pop();
+      banner.innerHTML = `${stale.length} task${stale.length === 1 ? "" : "s"} still open from earlier days.
+        <button type="button" class="btn-link" id="btn-dayplan-review">Review</button>`;
+      banner.hidden = false;
+      $("btn-dayplan-review").addEventListener("click", () => { dayRef = latest; renderDayPlan(); });
+    }
+  }
+
+  if (!items.length) {
+    $("dayplan-list").innerHTML = `<p class="empty">${isPast ? "No tasks were planned this day." : "No tasks for this day yet. Add them below."}</p>`;
+    return;
+  }
+  $("dayplan-list").innerHTML = items.map((t) => {
+    const open = t.status === AG_STATUS.OPEN, done = t.status === AG_STATUS.DONE;
+    const actions = [
+      open && isPast ? `<button class="btn-link" data-dt-carry="${t.id}">Carry to today</button>` : "",
+      open || done ? `<button class="btn-link" data-dt-toggle="${t.id}">${done ? "Mark open" : "Mark done"}</button>` : "",
+      open || done ? `<button class="btn-link danger" data-dt-delete="${t.id}">Remove</button>` : ""
+    ].join("");
+    const origin = dayOrigin(t);
+    return `
+    <article class="entry">
+      <div class="entry-top">
+        <span class="entry-name agenda-text${done ? " agenda-done" : ""}">${esc(t.text)}</span>
+        <span class="tag ${agendaTag(t.status)}">${esc(t.status)}</span>
+        ${actions ? `<span class="entry-actions">${actions}</span>` : ""}
+      </div>
+      ${origin ? `<div class="entry-meta">${esc(origin)}</div>` : ""}
+    </article>`;
+  }).join("");
+
+  const list = $("dayplan-list");
+  list.querySelectorAll("[data-dt-carry]").forEach((b) => b.addEventListener("click", () => carryDayTasks([b.dataset.dtCarry])));
+  list.querySelectorAll("[data-dt-toggle]").forEach((b) => b.addEventListener("click", () => toggleDayTask(b.dataset.dtToggle)));
+  list.querySelectorAll("[data-dt-delete]").forEach((b) => b.addEventListener("click", () => deleteDayTask(b.dataset.dtDelete)));
+}
+
+async function toggleDayTask(id) {
+  const t = state.dayTasks.find((x) => x.id === id);
+  if (!t || t.status === AG_STATUS.CARRIED) return;
+  const next = t.status === AG_STATUS.DONE ? AG_STATUS.OPEN : AG_STATUS.DONE;
+  try {
+    await updateDoc(doc(db, "dayTasks", id), { status: next, updatedAt: serverTimestamp() });
+    t.status = next;
+    renderDayPlan();
+  } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
+}
+
+async function deleteDayTask(id) {
+  const t = state.dayTasks.find((x) => x.id === id);
+  if (!t) return;
+  if (!confirm(`Remove "${t.text}"?`)) return;
+  try {
+    await deleteDoc(doc(db, "dayTasks", id));
+    state.dayTasks = state.dayTasks.filter((x) => x.id !== id);
+    renderDayPlan();
+  } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
+}
+
+// Same atomic copy-and-mark as the weekly planner's carry.
+async function carryDayTasks(ids) {
+  const target = todayISO();
+  const items = ids.map((id) => state.dayTasks.find((x) => x.id === id))
+    .filter((t) => t && t.status === AG_STATUS.OPEN && t.day < target)
+    .sort((a, b) => (a.day || "").localeCompare(b.day || "") || (a.seq || 0) - (b.seq || 0));
+  if (!items.length) return;
+  try {
+    const base = Date.now();
+    for (let c = 0; c < items.length; c += AGENDA_BATCH_ITEMS) {
+      const batch = writeBatch(db);
+      items.slice(c, c + AGENDA_BATCH_ITEMS).forEach((t, i) => {
+        batch.set(doc(collection(db, "dayTasks")), {
+          day: target, text: t.text, status: AG_STATUS.OPEN, seq: base + c + i,
+          carriedFrom: t.day, carriedTo: "", firstDay: t.firstDay || t.day,
+          ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        });
+        batch.update(doc(db, "dayTasks", t.id), { status: AG_STATUS.CARRIED, carriedTo: target, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+    toast(items.length === 1 ? "Carried to today" : `Carried ${items.length} tasks to today`);
+  } catch (e) {
+    toast("Couldn't carry that. " + (e.message || ""));
+  }
+  await loadDayTasks();
+  renderDayPlan();
+}
+
 /* ============================ travel plan: filed for approval ============================ */
 const TP_STATUS = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" };
 
@@ -2222,7 +2397,9 @@ $("log-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("log-panel-leads").hidden = logSub !== "leads";
     $("log-panel-weeklyplan").hidden = logSub !== "weeklyplan";
     $("log-panel-travelplan").hidden = logSub !== "travelplan";
+    $("log-panel-dayplan").hidden = logSub !== "dayplan";
     if (logSub === "weeklyplan") renderWeeklyPlan();
+    if (logSub === "dayplan") renderDayPlan();
     if (logSub === "travelplan") renderTravelPlan();
   }));
 
