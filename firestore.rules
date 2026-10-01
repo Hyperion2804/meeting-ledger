@@ -37,6 +37,8 @@ rules_version = '2';
 //    weekAgendas — the weekly planner: non-meeting work for a week, no
 //               fixed day. Same rules as weeklyPlans, except Observer
 //               can't read it at all.
+//    dayTasks   — a Superadmin's private day planner. Only the owning
+//               Superadmin can read or write; nobody else, at all.
 //    travelPlans — a trip filed for approval. Same visibility shape.
 //               Approval: Team Lead approves their own reports; Admin
 //               and Superadmin approve each other and everyone else —
@@ -278,6 +280,29 @@ service cloud.firestore {
 
       allow delete: if isAdminOrAbove()
         || (canLog() && resource.data.rmEmail == callerEmail());
+    }
+
+    // ---------- dayTasks: a Superadmin's private day planner ----------
+    // Strictly private: only the Superadmin who owns a task can read or
+    // write it. No Admin override, no other Superadmin, no Observer.
+    // Owner is stamped as ownerEmail and can never be changed.
+    match /dayTasks/{taskId} {
+      allow get, list: if isSuperAdmin() && resource.data.ownerEmail == callerEmail();
+
+      allow create: if isSuperAdmin()
+        && request.resource.data.ownerEmail == callerEmail()
+        && request.resource.data.day is string
+        && request.resource.data.day.size() == 10
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.status in ['Open', 'Done'];
+
+      allow update: if isSuperAdmin()
+        && resource.data.ownerEmail == callerEmail()
+        && request.resource.data.ownerEmail == callerEmail();
+
+      allow delete: if isSuperAdmin() && resource.data.ownerEmail == callerEmail();
     }
 
     // ---------- weekAgendas: the weekly planner (non-meeting work) ----------
