@@ -273,10 +273,29 @@ reports; Admin/Superadmin: everyone) in the **Weekly planner** table on
 Master → Weekly plan, which has its own week arrows. The planner lives in
 its own collection (`weekAgendas`).
 
+**Follow-ups: log them in one click, and see which are done.** In the
+"Follow-ups this week" card, each meeting follow-up has a **Log follow-up**
+button. It opens the meeting form as a new *Follow-up* meeting dated today,
+with the person's details carried over (name, type, phone, email, address,
+source, reference; WM/CP are linked to the same registered contact, looked
+up fresh). How the conversation went — mode, result, remarks, next
+follow-up date — is left for you to fill in; nothing from last time is
+copied into it. The original meeting isn't changed.
+
+A meeting counts as **followed up** once any later meeting with the same
+phone number is logged (an early follow-up counts). The Follow-up column in
+My history, Master → Every meeting and Day view shows "✓ Followed up
+<date>", or **Overdue** if the date has passed with nothing logged since —
+so Team Lead, Admin, Superadmin and Observer see the same status the RM
+does. Downloads are unchanged.
+
 **Day planner (Superadmin only, private).** Superadmins get a **Day
 planner** sub-tab under My meetings: a task list for one day at a time.
-Paste a list or add tasks one by one, mark them done, use ‹ › to move
-between days. Past days are read-only; open tasks get **Carry to today**
+Paste a list or add tasks one by one, use ‹ › to move between days.
+**Mark done** asks what was done (required) and, optionally, a next step
+and the day for it (today or later) — the next step is added to that day
+automatically, labelled with the task it came from. Mark open clears the
+note; a next step already created stays. Past days are read-only; open tasks get **Carry to today**
 (same honest-record carry as the weekly planner), and today shows a
 reminder if anything is still open from earlier days. It is completely
 private: `firestore.rules` let only the Superadmin who wrote a task read
