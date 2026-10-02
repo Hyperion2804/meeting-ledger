@@ -99,7 +99,6 @@
       <button class="subtab" data-sub="leads" role="tab" aria-selected="false">Leads</button>
       <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
       <button class="subtab" data-sub="travelplan" role="tab" aria-selected="false">Travel plan</button>
-      <button class="subtab" data-sub="dayplan" id="subtab-dayplan" role="tab" aria-selected="false" hidden>Day planner</button>
     </nav>
 
     <div id="log-panel-log" class="page-split">
@@ -401,6 +400,10 @@
               <span>Day not confirmed yet, plan it for that week</span>
             </label>
             <p id="wp-tbc-note" class="wp-tbc-note" hidden></p>
+            <label class="field" id="field-wp-time">
+              <span>Time <em>optional, shows the meeting at that time on the calendar</em></span>
+              <input type="time" id="wp-time" />
+            </label>
             <label class="field">
               <span>Name</span>
               <input type="text" id="wp-name" placeholder="Who are you planning to meet?" autocomplete="off" required />
@@ -436,31 +439,6 @@
           <div id="weeklyplan-list" class="list"></div>
         </section>
       </div>
-    </div>
-
-    <div id="log-panel-dayplan" hidden>
-      <section class="card agenda-card">
-        <div class="card-head">
-          <h2>Day planner <em class="card-note">private, only you can see this</em></h2>
-          <div class="week-nav">
-            <button type="button" id="btn-dayplan-prev" class="btn-link" title="Previous day">‹</button>
-            <span class="card-note" id="dayplan-range-label"></span>
-            <button type="button" id="btn-dayplan-next" class="btn-link" title="Next day">›</button>
-            <button type="button" id="btn-dayplan-today" class="btn-link">Today</button>
-          </div>
-        </div>
-        <p id="dayplan-banner" class="agenda-banner" hidden></p>
-        <div id="dayplan-list" class="list agenda-list"></div>
-        <form id="dayplan-form" class="form agenda-form" novalidate>
-          <label class="field">
-            <span>Add tasks for this day <em>one per line, or paste a whole list</em></span>
-            <textarea id="dayplan-text" rows="3" placeholder="What needs doing on this day"></textarea>
-          </label>
-          <p id="dayplan-error" class="form-error" hidden></p>
-          <button type="submit" class="btn btn-primary">Add tasks</button>
-        </form>
-        <p id="dayplan-past-note" class="agenda-past-note" hidden>This day has passed, so nothing new can be added. Open tasks can be carried to today.</p>
-      </section>
     </div>
 
     <div id="log-panel-travelplan" hidden>
