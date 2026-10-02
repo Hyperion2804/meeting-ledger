@@ -241,7 +241,9 @@ everyone's — Admin, Superadmin, and Observer included.
 **The Weekly plan tab has two halves.**
 
 *Meetings scheduled* (the form on the left and the list beside it) is
-every meeting you're planning. If the day isn't fixed yet, tick **Day not
+every meeting you're planning. A confirmed day can also have an optional
+**time** — Hyperion Calendar then shows the meeting at that time (as a
+one-hour block) instead of as an all-day item. If the day isn't fixed yet, tick **Day not
 confirmed yet** and pick any day in that week: it's saved as "Week of
 28-09-2026 · day TBC", location becomes optional, and a **Set date**
 button appears for when the day firms up (location is asked for then if
@@ -289,19 +291,11 @@ My history, Master → Every meeting and Day view shows "✓ Followed up
 so Team Lead, Admin, Superadmin and Observer see the same status the RM
 does. Downloads are unchanged.
 
-**Day planner (Superadmin only, private).** Superadmins get a **Day
-planner** sub-tab under My meetings: a task list for one day at a time.
-Paste a list or add tasks one by one, use ‹ › to move between days.
-**Mark done** asks what was done (required) and, optionally, a next step
-and the day for it (today or later) — the next step is added to that day
-automatically, labelled with the task it came from. Mark open clears the
-note; a next step already created stays. Past days are read-only; open tasks get **Carry to today**
-(same honest-record carry as the weekly planner), and today shows a
-reminder if anything is still open from earlier days. It is completely
-private: `firestore.rules` let only the Superadmin who wrote a task read
-or change it. Not other Superadmins, not Admin, not Observer, and it
-appears in no Master view or export. If someone stops being a Superadmin,
-they lose access to their own day planner too. Stored in `dayTasks`.
+**Day planner → moved to Hyperion Calendar.** The Superadmin day planner
+now lives in the separate Hyperion Calendar app (same Firebase project,
+same logins). Its tasks are in the same `dayTasks` collection, so nothing
+was lost in the move. The calendar also shows each Admin/Superadmin's
+office timings, availability, scheduled meetings and approved travel.
 
 **Master → Travel plans** lists every trip in scope for the chosen month
 (a trip shows in every month its dates touch), with status and who
