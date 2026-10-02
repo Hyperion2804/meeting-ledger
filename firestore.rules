@@ -37,8 +37,13 @@ rules_version = '2';
 //    weekAgendas — the weekly planner: non-meeting work for a week, no
 //               fixed day. Same rules as weeklyPlans, except Observer
 //               can't read it at all.
-//    dayTasks   — a Superadmin's private day planner. Only the owning
-//               Superadmin can read or write; nobody else, at all.
+//    dayTasks   — a Superadmin's private task list, used by the Hyperion
+//               Calendar app. Only the owning Superadmin can read or
+//               write; nobody else, at all.
+//    calProfiles — Hyperion Calendar: each Admin/Superadmin's office
+//               timings. All Admins/Superadmins read; owner writes.
+//    calEvents  — Hyperion Calendar: busy blocks, leave, out of office,
+//               WFH. All Admins/Superadmins read; owner writes.
 //    travelPlans — a trip filed for approval. Same visibility shape.
 //               Approval: Team Lead approves their own reports; Admin
 //               and Superadmin approve each other and everyone else —
@@ -282,7 +287,7 @@ service cloud.firestore {
         || (canLog() && resource.data.rmEmail == callerEmail());
     }
 
-    // ---------- dayTasks: a Superadmin's private day planner ----------
+    // ---------- dayTasks: a Superadmin's private task list (Calendar app) ----------
     // Strictly private: only the Superadmin who owns a task can read or
     // write it. No Admin override, no other Superadmin, no Observer.
     // Owner is stamped as ownerEmail and can never be changed.
@@ -303,6 +308,52 @@ service cloud.firestore {
         && request.resource.data.ownerEmail == callerEmail();
 
       allow delete: if isSuperAdmin() && resource.data.ownerEmail == callerEmail();
+    }
+
+    // ==================== HYPERION CALENDAR (separate app, same project) ====================
+    // The calendar app shares this Firebase project so it can show Meeting
+    // Ledger data (meetings, scheduled meetings, travel) without copying it.
+    // Only Admins and Superadmins can use it. Everything below is readable
+    // by every Admin/Superadmin (so they see each other's week) and
+    // writable only by its owner. Tasks (dayTasks, above) stay private.
+
+    // A calendar event is valid when its shape is right: a known kind, a
+    // date range that runs forwards, and HH:MM times when it isn't all-day.
+    function calEventValid(d) {
+      return d.kind in ['busy', 'leave', 'ooo', 'wfh']
+        && d.title is string && d.title.size() <= 200
+        && d.date is string && d.date.size() == 10
+        && d.endDate is string && d.endDate.size() == 10
+        && d.endDate >= d.date
+        && d.allDay is bool
+        && (d.allDay == true
+            || (d.start is string && d.start.size() == 5
+                && d.end is string && d.end.size() == 5
+                && d.end > d.start
+                && d.endDate == d.date));
+    }
+
+    // ---------- calProfiles: each person's regular office timings ----------
+    // Document ID = the person's email, so there's exactly one per person.
+    match /calProfiles/{email} {
+      allow get, list: if isAdminOrAbove();
+      allow create, update: if isAdminOrAbove()
+        && email == callerEmail()
+        && request.resource.data.officeHours is map;
+      allow delete: if isAdminOrAbove() && email == callerEmail();
+    }
+
+    // ---------- calEvents: busy blocks, leave, out of office, WFH ----------
+    match /calEvents/{eventId} {
+      allow get, list: if isAdminOrAbove();
+      allow create: if isAdminOrAbove()
+        && request.resource.data.ownerEmail == callerEmail()
+        && calEventValid(request.resource.data);
+      allow update: if isAdminOrAbove()
+        && resource.data.ownerEmail == callerEmail()
+        && request.resource.data.ownerEmail == callerEmail()
+        && calEventValid(request.resource.data);
+      allow delete: if isAdminOrAbove() && resource.data.ownerEmail == callerEmail();
     }
 
     // ---------- weekAgendas: the weekly planner (non-meeting work) ----------
