@@ -993,7 +993,15 @@ function resetForm() {
 }
 
 const phoneDigitsOf = (v) => (v || "").replace(/\D/g, "");
-const meetingDocId = (date, phone) => `${date}_${phoneDigitsOf(phone)}`;
+// One document per person per client per day: `${date}_${phone}_${email}`.
+// The email is part of the ID so two people who meet the same client on
+// the same day each keep their own meeting — before, the ID was only
+// date + phone, and an Admin's save could silently overwrite a colleague's.
+// Re-saving your OWN entry for the same phone + date still lands on the
+// same document, so it's treated as a correction, not a duplicate.
+// Meetings saved under the old ID keep working and move to the new ID
+// the next time their owner edits them.
+const meetingDocId = (date, phone, email = state.user.email) => `${date}_${phoneDigitsOf(phone)}_${email}`;
 
 /* ============================ bulk import from Excel ============================ */
 $("btn-import").addEventListener("click", () => {
@@ -1355,7 +1363,7 @@ $("meeting-form").addEventListener("submit", async (e) => {
     renderLog();
   } catch (e2) {
     if (e2.code === "permission-denied") {
-      err.textContent = "That phone number already has a meeting logged for this date — it wasn't added again.";
+      err.textContent = "The database refused this save. If it keeps happening, ask a Super Admin to publish the latest firestore.rules.";
     } else {
       err.textContent = "Couldn't save that. " + (e2.message || "Check your connection and try again.");
     }
@@ -1519,6 +1527,31 @@ function startEdit(id) {
 }
 
 
+/* ============================ busy slots (for Hyperion Calendar) ============================ */
+// Hyperion Calendar shows everyone's availability to everyone, but a
+// colleague's client name, phone and purpose must stay private. Firestore
+// can't hide fields of a document, so each planned meeting and each
+// approved trip gets a small mirror in busySlots holding only who, when
+// and status. The calendar reads those for other people's calendars.
+// Best-effort: a failed slot write never blocks the real save, and an
+// Admin opening the calendar repairs any slot that's missing or stale.
+const slotOfPlan = (id, p) => ({
+  kind: "meeting", sourceId: id, ownerEmail: p.rmEmail, ownerName: p.rmName || p.rmEmail,
+  date: p.date || "", time: p.time || "", weekStart: p.weekStart || (p.date ? weekBoundsAround(localDate(p.date)).start : ""),
+  endDate: "", status: p.status || "Planned", companionEmails: p.companionEmails || [], updatedAt: serverTimestamp()
+});
+const slotOfTravel = (id, t) => ({
+  kind: "travel", sourceId: id, ownerEmail: t.rmEmail, ownerName: t.rmName || t.rmEmail,
+  date: t.fromDate || "", time: "", weekStart: "", endDate: t.toDate || t.fromDate || "",
+  status: t.status, companionEmails: [], updatedAt: serverTimestamp()
+});
+async function syncSlot(slotId, data) {
+  try {
+    if (data) await setDoc(doc(db, "busySlots", slotId), data);
+    else await deleteDoc(doc(db, "busySlots", slotId));
+  } catch (e) { console.warn("Calendar availability not updated (an Admin opening the calendar will fix it):", e); }
+}
+
 /* ============================ weekly plan: who, where, why ============================ */
 fillSelect($("wp-personType"), OPTIONS.personType, { blank: true });
 $("wp-date").value = todayISO();
@@ -1650,12 +1683,15 @@ $("weeklyplan-form").addEventListener("submit", async (e) => {
       // Planner → meetings in one atomic write: the meeting is created and
       // the planner item removed together, so it's never in both or neither.
       const batch = writeBatch(db);
-      batch.set(doc(collection(db, "weeklyPlans")), data);
+      const ref = doc(collection(db, "weeklyPlans"));
+      batch.set(ref, data);
       batch.delete(doc(db, "weekAgendas", moved));
       await batch.commit();
+      await syncSlot(`plan_${ref.id}`, slotOfPlan(ref.id, data));
       toast("Moved to meetings scheduled");
     } else {
-      await addDoc(collection(db, "weeklyPlans"), data);
+      const ref = await addDoc(collection(db, "weeklyPlans"), data);
+      await syncSlot(`plan_${ref.id}`, slotOfPlan(ref.id, data));
       toast("Added to meetings scheduled");
     }
     resetWeeklyPlanForm();
@@ -1761,6 +1797,7 @@ async function saveWeeklyPlanDate(id) {
   try {
     await updateDoc(doc(db, "weeklyPlans", id), patch);
     Object.assign(p, patch);
+    await syncSlot(`plan_${id}`, slotOfPlan(id, p));
     wpSettingDateId = null;
     toast(`Set for ${fmtDMY(date)}${time ? " at " + time : ""}`);
     renderWeeklyPlan();
@@ -1774,6 +1811,7 @@ async function toggleWeeklyPlanStatus(id) {
   try {
     await updateDoc(doc(db, "weeklyPlans", id), { status: next, updatedAt: serverTimestamp() });
     p.status = next;
+    await syncSlot(`plan_${id}`, slotOfPlan(id, p));
     renderWeeklyPlan();
   } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
 }
@@ -1784,6 +1822,7 @@ async function deleteWeeklyPlan(id) {
   if (!confirm(`Remove ${p.name} from your plan?`)) return;
   try {
     await deleteDoc(doc(db, "weeklyPlans", id));
+    await syncSlot(`plan_${id}`, null);
     state.weeklyPlans = state.weeklyPlans.filter((x) => x.id !== id);
     renderWeeklyPlan();
   } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
@@ -1809,6 +1848,7 @@ async function promoteToMeeting(id) {
   try {
     await updateDoc(doc(db, "weeklyPlans", id), { status: WP_STATUS.DONE, updatedAt: serverTimestamp() });
     p.status = WP_STATUS.DONE;
+    syncSlot(`plan_${id}`, slotOfPlan(id, p));
   } catch (e) { /* the meeting form still opens even if this quietly fails */ }
 
   document.querySelector('#log-subtabs [data-sub="log"]').click();
@@ -2321,6 +2361,7 @@ async function decideTravelPlan(id, decision) {
       status: decision, approvedByEmail: state.user.email, approvedByName: state.profile.name || state.user.email,
       updatedAt: serverTimestamp()
     });
+    await syncSlot(`travel_${id}`, decision === TP_STATUS.APPROVED ? slotOfTravel(id, { ...p, status: decision }) : null);
     toast(`${decision}`);
     await loadTravelPlans();
     renderApprovals();
