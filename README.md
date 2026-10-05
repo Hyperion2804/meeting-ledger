@@ -458,6 +458,18 @@ only date + phone, and an Admin's save could silently overwrite a
 colleague's meeting for the same client and day. That can't happen any
 more: nobody, Admins included, can change whose meeting it is.)
 
+**How a joint meeting is counted.** When two or more people log the same
+client (same phone) on the same day, each entry is marked **Joint**. Each
+person's entry counts in *their own* numbers (per-person tables, Plan vs
+Achievement, their own month). **Firm-wide totals count it once**, using
+the first entry logged: the stat grid, dashboard and charts, the funnel,
+the day-by-day tables, the "All RMs" total rows, and the `Master` tab of
+the Excel download. So per-person totals can add up to more than the firm
+total; Master says so when it happens. Every entry, with its own remarks,
+still appears in Every meeting and in the `All Meetings` tab (with a
+"Joint meeting" column). A lead recorded by both people from the same
+joint meeting shows once on Master and in Download leads.
+
 **Meeting dates can't be in the future.** The date picker won't let you go
 past today, and the app checks again on save regardless.
 
