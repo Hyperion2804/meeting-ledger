@@ -425,6 +425,14 @@
               <input type="text" id="wp-location" placeholder="Where's this happening?" autocomplete="off" required />
             </label>
             <label class="field">
+              <span>Going with</span>
+              <select id="wp-with">
+                <option value="alone" selected>Alone</option>
+                <option value="others">With colleagues</option>
+              </select>
+            </label>
+            <div id="wp-with-list" class="wp-with-list" hidden></div>
+            <label class="field">
               <span>Purpose / notes <em>optional</em></span>
               <textarea id="wp-purpose" rows="3" placeholder="What's this meeting about?"></textarea>
             </label>
