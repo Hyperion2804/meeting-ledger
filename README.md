@@ -292,6 +292,14 @@ on Master, where a **Going with** column shows who went along.
 **Republish `firestore.rules`** for this — every member can now list the
 team (needed to pick names), and people going along can read the meeting.
 
+**Hyperion Calendar is now for everyone (except Observer).** To let
+colleagues see that someone is busy without seeing who they're meeting,
+Meeting Ledger now also writes a small `busySlots` record (who, when,
+status, no client details) whenever a meeting is planned, its date is
+set, it's marked done or removed, and whenever a trip is approved or
+rejected. If that write ever fails it doesn't block the save; an Admin
+opening the calendar repairs it. **Republish `firestore.rules`** for this.
+
 **Marking a planner item done asks what was done** — same as a day task
 in Hyperion Calendar. "What was done" is required; **Next step** is
 optional. If you add one, pick any day in the week it belongs to and it
@@ -441,11 +449,14 @@ result isn't Interested, the Lead/Docs Shared field is switched off. If a
 lead or document wasn't actually shared yet ("Not yet" or "No"), Meeting
 Done/Logged In switches off too — there's nothing to be done or pending yet.
 
-**Duplicate meetings are blocked automatically.** The same phone number on
-the same date can only exist once — the database itself refuses a second
-attempt by a different person (they'll see "That phone number already has a
-meeting logged for this date"). Re-saving your own entry for the same
-phone+date is treated as a correction, not a duplicate.
+**Two people can log the same client on the same day.** Each meeting is
+saved per person (date + phone + who logged it), so if two of you meet the
+same client — together or separately — each keeps their own entry and
+both count on Master. Saving your own entry again for the same phone and
+date is treated as a correction, not a duplicate. (Previously the ID was
+only date + phone, and an Admin's save could silently overwrite a
+colleague's meeting for the same client and day. That can't happen any
+more: nobody, Admins included, can change whose meeting it is.)
 
 **Meeting dates can't be in the future.** The date picker won't let you go
 past today, and the app checks again on save regardless.
