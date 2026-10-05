@@ -136,8 +136,9 @@ service cloud.firestore {
       allow get:  if canViewAll()
         || (onDomain() && callerEmail() == email)
         || (isTeamLead() && resource.data.managedBy == callerEmail());
-      allow list: if canViewAll()
-        || (isTeamLead() && resource.data.managedBy == callerEmail());
+      // Any member can list the team — needed for "Going with" on a
+      // planned meeting. Writes stay Superadmin-only.
+      allow list: if isMember();
       allow write: if isSuperAdmin();
     }
 
@@ -268,7 +269,8 @@ service cloud.firestore {
     match /weeklyPlans/{planId} {
       allow get, list: if canViewAll()
         || (isMember() && resource.data.rmEmail == callerEmail())
-        || (isTeamLead() && isMyReport(resource.data.rmEmail));
+        || (isTeamLead() && isMyReport(resource.data.rmEmail))
+        || (isMember() && callerEmail() in resource.data.companionEmails);   // going along
 
       // A plan has either a confirmed day (date) or, with the day still to
       // be confirmed, an empty date plus the Monday of its week (weekStart).
