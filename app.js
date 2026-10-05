@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], weekAgendas: [], travelPlans: [], holidays: new Map(), reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], colleagues: [], weekAgendas: [], travelPlans: [], holidays: new Map(), reportEmails: [], page: null, editingId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -389,6 +389,7 @@ async function loadAll() {
     loadContacts(),
     loadLeads(),
     loadWeeklyPlans(),
+    loadColleagues(),
     loadWeekAgendas(),
     loadTravelPlans(),
     loadHolidays(),
@@ -446,10 +447,35 @@ async function loadWeeklyPlans() {
   const q = canViewAll() ? col
     : isTeamLead() ? query(col, where("rmEmail", "in", scopeEmails()))
     : query(col, where("rmEmail", "==", state.user.email));
-  const snap = await getDocs(q);
-  state.weeklyPlans = snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
+  const snaps = [await getDocs(q)];
+  // Meetings someone else planned with you going along. Admins already
+  // see everything; everyone else needs this second query. Never allowed
+  // to break the rest of the load (e.g. before the new rules are published).
+  if (!canViewAll()) {
+    try { snaps.push(await getDocs(query(col, where("companionEmails", "array-contains", state.user.email)))); }
+    catch (e) { console.warn("Couldn't load meetings you're going along to:", e); }
+  }
+  const byId = new Map();
+  snaps.forEach((snap) => snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() })));
+  state.weeklyPlans = [...byId.values()]
     .sort((x, y) => (x.date || "").localeCompare(y.date || ""));
+}
+
+// Everyone who could go along to a meeting: active RMs, Team Leads,
+// Admins and Superadmins (never Observer), minus yourself.
+const COMPANION_ROLES = ["rm", "teamlead", "admin", "superadmin"];
+async function loadColleagues() {
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    state.colleagues = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .map((u) => ({ ...u, email: (u.email || u.id || "").toLowerCase() }))
+      .filter((u) => u.active !== false && COMPANION_ROLES.includes(u.role) && u.email !== state.user.email)
+      .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+  } catch (e) {
+    console.warn("Couldn't load colleagues for 'Going with':", e);
+    state.colleagues = [];
+  }
+  renderWpWith();
 }
 
 // Weekly planner items. Same shape as weeklyPlans EXCEPT Observer: the
@@ -1553,8 +1579,26 @@ function clearMovingAgenda() {
   $("wp-move-note").innerHTML = "";
 }
 
+// "Going with": Alone by default; switch to "With colleagues" to tick who.
+function renderWpWith() {
+  const list = $("wp-with-list");
+  if (!list) return;
+  const ticked = new Set([...list.querySelectorAll("input:checked")].map((c) => c.value));
+  list.innerHTML = state.colleagues.length
+    ? state.colleagues.map((u) => `<label class="check-field">
+        <input type="checkbox" value="${esc(u.email)}"${ticked.has(u.email) ? " checked" : ""} />
+        <span>${esc(u.name || u.email)}${u.designation ? ` <em>${esc(u.designation)}</em>` : ""}</span></label>`).join("")
+    : `<p class="empty">Couldn't load the team list. Ask a Super Admin to publish the latest firestore.rules.</p>`;
+}
+function syncWpWith() { $("wp-with-list").hidden = $("wp-with").value !== "others"; }
+$("wp-with").addEventListener("change", syncWpWith);
+const withNames = (p) => (p.companionNames || []).join(", ");
+
 function resetWeeklyPlanForm() {
   $("weeklyplan-form").reset();
+  $("wp-with").value = "alone";
+  $("wp-with-list").querySelectorAll("input").forEach((c) => { c.checked = false; });
+  syncWpWith();
   $("wp-date").value = todayISO();
   $("wp-tbc").checked = false;
   clearMovingAgenda();
@@ -1584,10 +1628,16 @@ $("weeklyplan-form").addEventListener("submit", async (e) => {
   if (!personType) return fail("Pick a meeting person type.");
   if (!location && !tbc) return fail("Add a location.");
   if ($("wp-phone").value && phone.length !== 10) return fail("Enter a valid 10-digit phone number, or leave it blank.");
+  const going = $("wp-with").value === "others"
+    ? [...$("wp-with-list").querySelectorAll("input:checked")].map((c) => state.colleagues.find((u) => u.email === c.value)).filter(Boolean)
+    : [];
+  if ($("wp-with").value === "others" && !going.length) return fail("Tick who's going with you, or switch back to Alone.");
 
   const data = {
     date: tbc ? "" : picked, time, weekStart, dateTbc: tbc,
     name, personType, phone, location, purpose,
+    companionEmails: going.map((u) => u.email),
+    companionNames: going.map((u) => u.name || u.email),
     status: WP_STATUS.PLANNED,
     rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
     rmEmployeeId: state.profile.employeeId || "",
@@ -1620,7 +1670,8 @@ $("weeklyplan-month").addEventListener("change", renderWeeklyPlan);
 function renderWeeklyPlan() {
   renderAgenda();   // the weekly planner sits above the meetings on the same sub-tab
   const m = $("weeklyplan-month").value || thisMonth();
-  const mine = state.weeklyPlans.filter((p) => p.rmEmail === state.user.email && planInMonth(p, m))
+  const me = state.user.email;
+  const mine = state.weeklyPlans.filter((p) => (p.rmEmail === me || (p.companionEmails || []).includes(me)) && planInMonth(p, m))
     .sort((a, b) => planSortKey(a).localeCompare(planSortKey(b)));
 
   if (!mine.length) {
@@ -1628,6 +1679,22 @@ function renderWeeklyPlan() {
     return;
   }
   $("weeklyplan-list").innerHTML = mine.map((p) => {
+    // Going along to someone else's meeting: shown here, read-only — the
+    // person who planned it confirms the day, logs it and marks it done.
+    if (p.rmEmail !== me) {
+      const others = (p.companionNames || []).filter((_, i) => p.companionEmails[i] !== me);
+      return `
+    <article class="entry">
+      <div class="entry-top">
+        <span class="entry-name">${esc(p.name)}</span>
+        <span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span>
+        <span class="tag tag-flat">Going along</span>
+      </div>
+      <div class="entry-meta">${esc(planWhen(p))} · ${esc(p.personType)}${p.phone ? " · " + esc(p.phone) : ""}${p.location ? " · " + esc(p.location) : ""}</div>
+      <div class="entry-meta">Planned by ${esc(p.rmName || p.rmEmail)}${others.length ? ` · also with ${esc(others.join(", "))}` : ""}</div>
+      ${p.purpose ? `<div class="entry-remarks">${esc(p.purpose)}</div>` : ""}
+    </article>`;
+    }
     const tbcOpen = !p.date && p.status !== WP_STATUS.DONE;
     const editing = wpSettingDateId === p.id && tbcOpen;
     return `
@@ -1643,6 +1710,7 @@ function renderWeeklyPlan() {
         </span>
       </div>
       <div class="entry-meta">${esc(planWhen(p))} · ${esc(p.personType)}${p.phone ? " · " + esc(p.phone) : ""}${p.location ? " · " + esc(p.location) : ""}</div>
+      <div class="entry-meta">Going with: ${esc(withNames(p) || "Alone")}</div>
       ${p.purpose ? `<div class="entry-remarks">${esc(p.purpose)}</div>` : ""}
       ${editing ? `
       <div class="wp-setdate">
@@ -1760,15 +1828,16 @@ function renderMasterWeeklyPlan() {
   $("master-weeklyplan-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
 
   $("tbl-master-weeklyplan").innerHTML = `<thead><tr>
-    <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Phone</th><th>Location</th><th>Purpose</th><th>Status</th>
+    <th>Date</th><th>RM</th><th>Going with</th><th>Name</th><th>Type</th><th>Phone</th><th>Location</th><th>Purpose</th><th>Status</th>
     </tr></thead><tbody>${
       rows.length ? rows.map((p) => `<tr>
         <td class="num">${esc(planWhen(p))}</td><td>${esc(p.rmName || p.rmEmail)}</td>
+        <td class="wrap">${esc(withNames(p) || "Alone")}</td>
         <td class="name">${esc(p.name)}</td><td>${esc(p.personType)}</td>
         <td>${esc(p.phone || "—")}</td><td class="wrap">${esc(p.location || "—")}</td>
         <td class="wrap">${esc(p.purpose || "")}</td>
         <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>`).join("")
-        : `<tr><td colspan="8" class="empty">No meetings scheduled this month.</td></tr>`
+        : `<tr><td colspan="9" class="empty">No meetings scheduled this month.</td></tr>`
     }</tbody>`;
   renderMasterAgenda();
 }
@@ -1789,6 +1858,8 @@ const AGENDA_MAX_LEN = 500;     // per item — matches firestore.rules
 const AGENDA_MAX_LINES = 50;    // per paste
 const AGENDA_BATCH_ITEMS = 200; // carry writes 2 ops per item; Firestore caps a batch at 500
 
+const AGENDA_NOTE_MAX = 1000;    // "what was done" note on a Done item
+let completingAgendaId = null;      // item whose "what was done" box is open
 let agendaRef = new Date();         // week on screen in Log → Weekly plan
 let masterAgendaRef = new Date();   // week on screen in Master → Weekly plan
 const agendaWeek = () => weekBoundsAround(agendaRef);
@@ -1896,7 +1967,8 @@ function renderAgenda() {
     const actions = [
       open && !isPast ? `<button class="btn-link" data-ag-move="${a.id}">Move to meetings</button>` : "",
       open && isPast ? `<button class="btn-link" data-ag-carry="${a.id}">Carry to this week</button>` : "",
-      open || done ? `<button class="btn-link" data-ag-toggle="${a.id}">${done ? "Mark open" : "Mark done"}</button>` : "",
+      open && completingAgendaId !== a.id ? `<button class="btn-link" data-ag-done="${a.id}">Mark done</button>` : "",
+      done ? `<button class="btn-link" data-ag-reopen="${a.id}">Mark open</button>` : "",
       open || done ? `<button class="btn-link danger" data-ag-delete="${a.id}">Remove</button>` : ""
     ].join("");
     const origin = agendaOrigin(a);
@@ -1908,23 +1980,91 @@ function renderAgenda() {
         ${actions ? `<span class="entry-actions">${actions}</span>` : ""}
       </div>
       ${origin ? `<div class="entry-meta">${esc(origin)}</div>` : ""}
+      ${a.fromItemText ? `<div class="entry-meta">Next step from: ${esc(a.fromItemText)}</div>` : ""}
+      ${done && a.doneNote ? `<div class="entry-remarks"><strong>Done:</strong> ${esc(a.doneNote)}</div>` : ""}
+      ${done && a.nextStep ? `<div class="entry-meta">Next step → week of ${esc(fmtDMY(a.nextStepWeek))}: ${esc(a.nextStep)}</div>` : ""}
+      ${open && completingAgendaId === a.id ? `
+      <div class="dt-complete">
+        <label class="field"><span>What was done</span>
+          <textarea id="ag-done-note" rows="2" placeholder="What happened, what was agreed"></textarea></label>
+        <div class="dt-next-row">
+          <label class="field"><span>Next step <em>optional</em></span>
+            <input type="text" id="ag-next-text" placeholder="The follow-on item, if any" autocomplete="off" /></label>
+          <label class="field"><span>For the week of</span>
+            <input type="date" id="ag-next-day" value="${wk.start > todayISO() ? wk.start : todayISO()}" min="${todayISO()}" /></label>
+        </div>
+        <p id="ag-complete-error" class="form-error" hidden></p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-ag-complete-save">Mark done</button>
+          <button type="button" class="btn-link" id="btn-ag-complete-cancel">Cancel</button>
+        </div>
+      </div>` : ""}
     </article>`;
   }).join("");
 
   const list = $("agenda-list");
   list.querySelectorAll("[data-ag-move]").forEach((b) => b.addEventListener("click", () => moveAgendaToMeetings(b.dataset.agMove)));
   list.querySelectorAll("[data-ag-carry]").forEach((b) => b.addEventListener("click", () => carryAgendaItems([b.dataset.agCarry])));
-  list.querySelectorAll("[data-ag-toggle]").forEach((b) => b.addEventListener("click", () => toggleAgendaStatus(b.dataset.agToggle)));
+  list.querySelectorAll("[data-ag-done]").forEach((b) => b.addEventListener("click", () => { completingAgendaId = b.dataset.agDone; renderAgenda(); $("ag-done-note").focus(); }));
+  list.querySelectorAll("[data-ag-reopen]").forEach((b) => b.addEventListener("click", () => reopenAgendaItem(b.dataset.agReopen)));
   list.querySelectorAll("[data-ag-delete]").forEach((b) => b.addEventListener("click", () => deleteAgendaItem(b.dataset.agDelete)));
+  if ($("btn-ag-complete-save")) {
+    $("btn-ag-complete-save").addEventListener("click", () => completeAgendaItem(completingAgendaId));
+    $("btn-ag-complete-cancel").addEventListener("click", () => { completingAgendaId = null; renderAgenda(); });
+  }
 }
 
-async function toggleAgendaStatus(id) {
+// Same flow as a day task in Hyperion Calendar: marking done asks what was
+// done (required) and an optional next step. The next step lands as a new
+// Open item in the week of the chosen date, linked back to this one.
+async function completeAgendaItem(id) {
   const a = state.weekAgendas.find((x) => x.id === id);
-  if (!a || a.status === AG_STATUS.CARRIED) return;
-  const next = a.status === AG_STATUS.DONE ? AG_STATUS.OPEN : AG_STATUS.DONE;
+  if (!a || a.status !== AG_STATUS.OPEN) return;
+  const err = $("ag-complete-error");
+  err.hidden = true;
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  const note = $("ag-done-note").value.trim();
+  const nextText = $("ag-next-text").value.trim();
+  const nextDay = $("ag-next-day").value;
+  if (!note) return fail("Add what was done before marking this done.");
+  if (note.length > AGENDA_NOTE_MAX) return fail(`Keep "what was done" under ${AGENDA_NOTE_MAX} characters.`);
+  let nextWeek = "";
+  if (nextText) {
+    if (nextText.length > AGENDA_MAX_LEN) return fail(`Keep the next step under ${AGENDA_MAX_LEN} characters.`);
+    if (!nextDay) return fail("Pick a day in the week for the next step.");
+    nextWeek = weekOfISO(nextDay).start;
+    if (nextWeek < currentWeekStart()) return fail("The next step can be for this week or a later one.");
+  }
   try {
-    await updateDoc(doc(db, "weekAgendas", id), { status: next, updatedAt: serverTimestamp() });
-    a.status = next;
+    const batch = writeBatch(db);
+    batch.update(doc(db, "weekAgendas", id), {
+      status: AG_STATUS.DONE, doneNote: note, nextStep: nextText, nextStepWeek: nextWeek, updatedAt: serverTimestamp()
+    });
+    if (nextText) batch.set(doc(collection(db, "weekAgendas")), {
+      weekStart: nextWeek, text: nextText, status: AG_STATUS.OPEN, seq: Date.now(),
+      carriedFrom: "", carriedTo: "", firstWeek: nextWeek,
+      fromItemId: id, fromItemText: a.text,
+      rmEmail: state.user.email, rmName: state.profile.name || state.user.email,
+      rmEmployeeId: state.profile.employeeId || "",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    await batch.commit();
+    completingAgendaId = null;
+    toast(nextText ? `Done. Next step added for the week of ${fmtDay(nextWeek)}` : "Marked done");
+    await loadWeekAgendas();
+    renderAgenda();
+  } catch (e) { fail("Couldn't save that. " + (e.message || "")); }
+}
+
+// Reopening clears the note and next step text. A next-step item already
+// created stays in its week — remove it there if it's no longer wanted.
+async function reopenAgendaItem(id) {
+  const a = state.weekAgendas.find((x) => x.id === id);
+  if (!a || a.status !== AG_STATUS.DONE) return;
+  const patch = { status: AG_STATUS.OPEN, doneNote: "", nextStep: "", nextStepWeek: "", updatedAt: serverTimestamp() };
+  try {
+    await updateDoc(doc(db, "weekAgendas", id), patch);
+    Object.assign(a, patch);
     renderAgenda();
   } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
 }
@@ -2020,7 +2160,12 @@ function renderMasterAgenda() {
         <td>${esc(a.rmName || a.rmEmail)}</td>
         <td class="wrap">${esc(a.text)}</td>
         <td><span class="tag ${agendaTag(a.status)}">${esc(a.status)}</span></td>
-        <td class="wrap">${esc(agendaOrigin(a))}</td></tr>`).join("")
+        <td class="wrap">${[
+          a.doneNote ? `<strong>Done:</strong> ${esc(a.doneNote)}` : "",
+          a.nextStep ? `Next step → week of ${esc(fmtDMY(a.nextStepWeek))}: ${esc(a.nextStep)}` : "",
+          a.fromItemText ? `Next step from: ${esc(a.fromItemText)}` : "",
+          esc(agendaOrigin(a))
+        ].filter(Boolean).join("<br>")}</td></tr>`).join("")
         : `<tr><td colspan="4" class="empty">Nothing in anyone's planner this week.</td></tr>`
     }</tbody>`;
 }
