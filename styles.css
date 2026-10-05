@@ -594,6 +594,10 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 .agenda-form{border-top:1px solid var(--rule-soft)}
 .agenda-text{font-weight:500;line-height:1.4}
 .agenda-done{text-decoration:line-through;color:var(--ink-3)}
+.dt-complete{display:grid;gap:10px;margin-top:6px;padding:12px;background:var(--paper);border:1px solid var(--rule-soft);border-radius:8px}
+.dt-next-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
+.dt-next-row input[type="date"]{font-family:var(--f-data);font-size:13px}
+@media (max-width:560px){.dt-next-row{grid-template-columns:1fr}}
 .agenda-banner{
   font-size:12.5px;color:var(--amber);background:var(--amber-wash);
   border-bottom:1px solid var(--rule);padding:9px 16px;margin:0;
@@ -620,3 +624,8 @@ div.fu-status{margin-left:0}
 .fu-status-done{color:var(--green)}
 .fu-status-overdue{color:var(--amber)}
 
+
+/* ---------------- weekly plan: "Going with" checklist ---------------- */
+.wp-with-list{display:grid;gap:6px;max-height:200px;overflow-y:auto;padding:10px 12px;border:1px solid var(--rule-soft);border-radius:8px;background:var(--paper)}
+.wp-with-list .check-field{margin-top:0}
+.wp-with-list .check-field em{font-style:normal;color:var(--ink-3);font-size:12px;margin-left:4px}
