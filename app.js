@@ -440,6 +440,52 @@ async function loadMeetings() {
   state.meetings = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .sort((x, y) => (y.date || "").localeCompare(x.date || ""));
+  markJointMeetings(state.meetings);
+}
+
+/* ---- joint meetings: same client, same day, logged by more than one person ----
+   Each person keeps their own entry (own remarks, result, follow-up, leads)
+   and it counts for them personally. Firm-wide totals count the client +
+   date ONCE, using the first entry logged (_firmPrimary). */
+const meetKey = (r) => `${r.date}_${phoneDigitsOf(r.phone || "")}`;
+const loggedAt = (r) => (r.createdAt && typeof r.createdAt.seconds === "number") ? r.createdAt.seconds : Number.MAX_SAFE_INTEGER;
+function markJointMeetings(rows) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    if (!groups.has(meetKey(r))) groups.set(meetKey(r), []);
+    groups.get(meetKey(r)).push(r);
+  });
+  for (const g of groups.values()) {
+    g.sort((a, b) => loggedAt(a) - loggedAt(b) || a.id.localeCompare(b.id));
+    g.forEach((r, i) => {
+      r._firmPrimary = i === 0;
+      r._joint = g.length > 1;
+      r._jointWith = g.filter((x) => x !== r).map((x) => x.rmName || x.rmEmail);
+    });
+  }
+}
+// Firm-level view of a list: one row per client + date, preferring the
+// first-logged entry. Apply BEFORE any chip filters, so a joint meeting is
+// always judged by the same (first) entry.
+function firmUnique(rows) {
+  const out = new Map();
+  for (const r of rows) {
+    const k = meetKey(r), cur = out.get(k);
+    if (!cur || (r._firmPrimary && !cur._firmPrimary)) out.set(k, r);
+  }
+  return [...out.values()];
+}
+const jointTag = (r) => r._joint
+  ? ` <span class="tag tag-flat" title="Also logged by ${esc(r._jointWith.join(", "))}${r._firmPrimary ? " · counted in firm totals" : " · firm totals use the first entry"}">Joint</span>` : "";
+// Leads recorded by two people from the same joint meeting show once.
+const leadBase = (l) => String(l.meetingId || "").split("_").slice(0, 2).join("_");
+function uniqueLeads(rows) {
+  const seen = new Set();
+  return [...rows].sort((a, b) => loggedAt(a) - loggedAt(b)).filter((l) => {
+    const k = `${leadBase(l)}_${l.leadPhone}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
 }
 
 async function loadWeeklyPlans() {
@@ -602,7 +648,7 @@ function renderSegmentTables(containerId, rowLabelHeader, rowDefs, totalsLabel) 
     const [shLbl, nshLbl] = shareLabel(sg);
     const [doneLbl, pendLbl] = doneLabel(sg);
     const rows = rowDefs.map(({ label, meetings }) => ({ label, s: summarise(meetings) }));
-    const totalMeetings = rowDefs.flatMap((r) => r.meetings);
+    const totalMeetings = firmUnique(rowDefs.flatMap((r) => r.meetings));   // a joint meeting counts once in the total
     const totalS = summarise(totalMeetings);
 
     const head = `<tr>
@@ -2990,20 +3036,28 @@ function renderStatGrid(containerId, s) {
 function renderMaster() {
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
-  const rows = state.meetings.filter((r) => r.date >= from && r.date <= to && (!rmFilter || r.rmEmail === rmFilter));
+  // rowsP: every person's own entry (personal numbers). rows: firm view,
+  // one per client + date (joint meetings counted once).
+  const rowsP = state.meetings.filter((r) => r.date >= from && r.date <= to && (!rmFilter || r.rmEmail === rmFilter));
+  const rows = firmUnique(rowsP);
   const s = summarise(rows);
+  const jointCount = rowsP.length - rows.length;
 
   const who = rmFilter ? (state.team.find((u) => u.email === rmFilter)?.name || rmFilter) : null;
-  $("master-sub").textContent = who
+  const rmCount = new Set(rowsP.map(r => r.rmEmail)).size;
+  $("master-sub").textContent = (who
     ? `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} · ${who} only.`
-    : `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} across ${new Set(rows.map(r => r.rmEmail)).size} relationship manager${new Set(rows.map(r => r.rmEmail)).size === 1 ? "" : "s"}.`;
+    : `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} across ${rmCount} relationship manager${rmCount === 1 ? "" : "s"}.`)
+    + (jointCount ? ` Joint meetings count once in firm totals (first entry logged) but count for each person in their own numbers, so per-person totals can add up to more.` : "");
 
   $("filters-summary-chip").textContent = who ? `${who} · ${label}` : label;
 
   renderMasterChips(rows);
-  const filteredRows = rows.filter((r) =>
+  const chip = (r) =>
     (!masterSegmentFilter || r.personType === masterSegmentFilter) &&
-    (!masterResultFilter || r.result === masterResultFilter));
+    (!masterResultFilter || r.result === masterResultFilter);
+  const filteredRows = rows.filter(chip);      // firm view
+  const filteredP = rowsP.filter(chip);        // everyone's own entries
   const sf = summarise(filteredRows);
 
   /* --- the stat grid — replaces the old dark funnel bars on Sheets.
@@ -3028,7 +3082,7 @@ function renderMaster() {
     if (!usingCustomRange) {
       const m = $("admin-month").value || thisMonth();
       const prevMonth = addDaysISO(`${m}-01`, -1).slice(0, 7);
-      const prevRows = state.meetings.filter((r) => r.date.startsWith(prevMonth) && (!rmFilter || r.rmEmail === rmFilter));
+      const prevRows = firmUnique(state.meetings.filter((r) => r.date.startsWith(prevMonth) && (!rmFilter || r.rmEmail === rmFilter)));
       if (prevRows.length) {
         const prevPct = Math.round((summarise(prevRows).allInterested / prevRows.length) * 100);
         const delta = pct - prevPct;
@@ -3044,7 +3098,7 @@ function renderMaster() {
 
   /* --- by RM (respects the active chips) --- */
   const byRm = new Map();
-  for (const r of filteredRows) {
+  for (const r of filteredP) {
     if (!byRm.has(r.rmEmail)) byRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
     byRm.get(r.rmEmail).rows.push(r);
   }
@@ -3057,7 +3111,7 @@ function renderMaster() {
   /* --- visual dashboard: stat strip + charts — deliberately stays on the
      unfiltered base set, same reasoning as the insight banner above. --- */
   const dashByRm = new Map();
-  for (const r of rows) {
+  for (const r of rowsP) {
     if (!dashByRm.has(r.rmEmail)) dashByRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
     dashByRm.get(r.rmEmail).rows.push(r);
   }
@@ -3080,8 +3134,9 @@ function renderMaster() {
   renderSegmentTables("daily-segment-tables", "Date", dayRowDefs, "Total");
 
   /* --- every meeting (respects the active chips) --- */
-  $("all-count").textContent = `${filteredRows.length} row${filteredRows.length === 1 ? "" : "s"}`;
-  const sorted = [...filteredRows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  // Every entry, joint meetings included (each person's own remarks).
+  $("all-count").textContent = `${filteredP.length} row${filteredP.length === 1 ? "" : "s"}`;
+  const sorted = [...filteredP].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const fuIdx = followUpIndex();
   $("tbl-all").innerHTML = `<thead><tr>
     <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
@@ -3090,7 +3145,7 @@ function renderMaster() {
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td class="num">${esc(fmtDMY(r.date))}</td><td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td><td>${esc(r.personType)}</td>
+        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>${jointTag(r)}</td><td>${esc(r.personType)}</td>
         <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
@@ -3107,8 +3162,8 @@ function renderMaster() {
      a lead has no "meeting result" field of its own to filter by. --- */
   $("leads-card").hidden = !canSeeTeamLeads();
   if (canSeeTeamLeads()) {
-    const leadRows = state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter)
-        && (!masterSegmentFilter || l.personType === masterSegmentFilter))
+    const leadRows = uniqueLeads(state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter)
+        && (!masterSegmentFilter || l.personType === masterSegmentFilter)))
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     $("leads-count").textContent = `${leadRows.length} lead${leadRows.length === 1 ? "" : "s"}`;
     $("tbl-leads").innerHTML = `<thead><tr>
@@ -3133,8 +3188,9 @@ function renderDayView() {
   const rmFilter = $("master-rm-filter").value;
   const scoped = (r) => !rmFilter || r.rmEmail === rmFilter;
 
-  const before = state.meetings.filter((r) => r.date < day && scoped(r));
-  const onDay = state.meetings.filter((r) => r.date === day && scoped(r));
+  const before = firmUnique(state.meetings.filter((r) => r.date < day && scoped(r)));
+  const onDayP = state.meetings.filter((r) => r.date === day && scoped(r));   // everyone's own entries
+  const onDay = firmUnique(onDayP);                                            // firm view
   const who = rmFilter ? (state.team.find((u) => u.email === rmFilter)?.name || rmFilter) : null;
 
   $("day-view-label").textContent = who ? `${who} only` : "All relationship managers";
@@ -3150,7 +3206,7 @@ function renderDayView() {
 
   /* --- by relationship manager, that day only --- */
   const byRm = new Map();
-  for (const r of onDay) {
+  for (const r of onDayP) {
     if (!byRm.has(r.rmEmail)) byRm.set(r.rmEmail, { name: r.rmName || r.rmEmail, rows: [] });
     byRm.get(r.rmEmail).rows.push(r);
   }
@@ -3160,7 +3216,7 @@ function renderDayView() {
   /* --- leads shared that day (Admin/Superadmin see all, Team Lead their reports, never Observer) --- */
   $("day-leads-card").hidden = !canSeeTeamLeads();
   if (canSeeTeamLeads()) {
-    const leadRows = state.leads.filter((l) => l.date === day && (!rmFilter || l.rmEmail === rmFilter))
+    const leadRows = uniqueLeads(state.leads.filter((l) => l.date === day && (!rmFilter || l.rmEmail === rmFilter)))
       .sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
     $("day-leads-count").textContent = `${leadRows.length} lead${leadRows.length === 1 ? "" : "s"}`;
     $("tbl-day-leads").innerHTML = `<thead><tr>
@@ -3177,7 +3233,7 @@ function renderDayView() {
 
   /* --- every meeting, that day only --- */
   const dayTypeFilter = $("day-type-filter").value;
-  const dayAllRows = dayTypeFilter === "all" ? onDay : onDay.filter((r) => r.personType === dayTypeFilter);
+  const dayAllRows = dayTypeFilter === "all" ? onDayP : onDayP.filter((r) => r.personType === dayTypeFilter);
   const sorted = [...dayAllRows].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
   $("day-all-count").textContent = `${sorted.length} row${sorted.length === 1 ? "" : "s"}`;
   const fuIdx = followUpIndex();
@@ -3188,7 +3244,7 @@ function renderDayView() {
     </tr></thead><tbody>${
       sorted.length ? sorted.map((r) => `<tr>
         <td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td><td>${esc(r.personType)}</td>
+        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>${jointTag(r)}</td><td>${esc(r.personType)}</td>
         <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
         <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
         <td>${esc(sourceDetail(r))}</td>
@@ -3232,6 +3288,7 @@ function exportWorkbook() {
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
   const rows = state.meetings.filter((r) => r.date >= from && r.date <= to && (!rmFilter || r.rmEmail === rmFilter));
+  const firmRows = firmUnique(rows);   // Master tab: joint meetings once; Data tab stays per person
 
   const byRmDate = new Map();
   for (const r of rows) {
@@ -3250,25 +3307,26 @@ function exportWorkbook() {
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
   const master = [rollupCols.map((i) => DATA_HEADERS[i])];
   eachDateISO(from, to).forEach((iso) => {
-    const drows = rows.filter((r) => r.date === iso);
+    const drows = firmRows.filter((r) => r.date === iso);
     if (!drows.length) return;
     const row = summaryRow(fmtDMY(iso), { name: "", designation: "", employeeId: "" }, drows);
     master.push(rollupCols.map((i) => row[i]));
   });
-  const totalsRow = summaryRow("Total", { name: "", designation: "", employeeId: "" }, rows);
+  const totalsRow = summaryRow("Total", { name: "", designation: "", employeeId: "" }, firmRows);
   master.push(rollupCols.map((i) => totalsRow[i]));
 
   const detail = [["Date", "RM", "Designation", "Employee ID", "Name", "Meeting Person Type",
     "Phone", "Email", "Address", "Type of Meeting", "Mode", "Prospect source", "Reference Name",
     "Meeting Result", "Not Interested Reason", "Lead / Docs Shared", "Meeting Done / Logged In",
-    "Follow up Date", "Remarks"]];
+    "Follow up Date", "Remarks", "Joint meeting"]];
   [...rows].sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
     const ru = rosterLookup(r.rmEmail);
     detail.push([
       fmtDMY(r.date), ru.name, ru.designation, ru.employeeId, r.prospectName, r.personType,
       r.phone || "", r.email || "", r.address || "", r.meetingType, r.mode, r.source || "",
       r.referenceName || "", r.result, r.notInterestedReason || "", r.shared || "", r.progressed || "",
-      fmtDMY(r.followUpDate), r.remarks || ""
+      fmtDMY(r.followUpDate), r.remarks || "",
+      r._joint ? `Also logged by ${r._jointWith.join(", ")}${r._firmPrimary ? " (counted in Master)" : " (Master counts the first entry)"}` : ""
     ]);
   });
 
@@ -3311,7 +3369,7 @@ function exportLeads() {
   if (typeof XLSX === "undefined") { toast("Excel library didn't load. Check your connection."); return; }
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
-  const rows = state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter));
+  const rows = uniqueLeads(state.leads.filter((l) => l.date >= from && l.date <= to && (!rmFilter || l.rmEmail === rmFilter)));
   if (!rows.length) { toast("No leads shared in that range."); return; }
 
   const sheet = [["Date", "RM", "Prospect (source of lead)", "Segment", "Lead Name", "Lead Phone", "Status", "Lead Date"]];
