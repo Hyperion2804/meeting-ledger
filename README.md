@@ -282,6 +282,25 @@ pre-filled with the text and "day not confirmed" ticked; the planner item
 is removed only when you save (in the same write, so it's never in both
 or lost). "Keep it in the planner" cancels.
 
+**"Going with" on a planned meeting.** Defaults to *Alone*. Switch it to
+*With colleagues* and tick who's coming — any active RM, Team Lead, Admin
+or Super Admin. The meeting then shows in each of their Meetings
+scheduled lists (tagged *Going along*, with who planned it) and on their
+Hyperion Calendar. It stays one meeting: only the person who planned it
+can set the date, log it, mark it done or remove it, and it counts once
+on Master, where a **Going with** column shows who went along.
+**Republish `firestore.rules`** for this — every member can now list the
+team (needed to pick names), and people going along can read the meeting.
+
+**Marking a planner item done asks what was done** — same as a day task
+in Hyperion Calendar. "What was done" is required; **Next step** is
+optional. If you add one, pick any day in the week it belongs to and it
+lands there as a new Open item, showing "Next step from: …". The done
+note and next step show under the item, and in the History column on
+Master → Weekly plan. **Mark open** clears the note; a next step already
+created stays in its week (remove it there if it's not needed). No rule
+changes needed — `firestore.rules` already allows these fields.
+
 **Nothing in the planner moves between weeks on its own.** Once a week
 ends it's read-only, and its open items get **Carry to this week** (or
 "Carry all"). Carrying marks the original *Carried* — so the old week
