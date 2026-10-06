@@ -629,3 +629,20 @@ div.fu-status{margin-left:0}
 .wp-with-list{display:grid;gap:6px;max-height:200px;overflow-y:auto;padding:10px 12px;border:1px solid var(--rule-soft);border-radius:8px;background:var(--paper)}
 .wp-with-list .check-field{margin-top:0}
 .wp-with-list .check-field em{font-style:normal;color:var(--ink-3);font-size:12px;margin-left:4px}
+
+/* joint meetings: one row, per-person values where they differ */
+.joint-val{line-height:1.35}
+.joint-val + .joint-val{margin-top:4px;padding-top:4px;border-top:1px dashed var(--rule-soft)}
+.joint-who{font-weight:600;color:var(--ink-2)}
+
+/* meeting lists: details row + full-width remarks row */
+#tbl-all td, #tbl-day-all td{vertical-align:top}
+tr.m-main td{border-bottom:none;padding-bottom:4px}
+tr.m-rem td{padding-top:0;padding-bottom:12px;border-bottom:1px solid var(--rule)}
+.m-contact{font-weight:400;font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.4;white-space:normal}
+.rem-box{width:0;min-width:100%;white-space:normal;color:var(--ink-2);font-size:13px;line-height:1.45}
+.rem-label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:2px}
+.rem-line + .rem-line{margin-top:4px}
+.rem-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rem-text.rem-open{display:block;-webkit-line-clamp:unset;overflow:visible}
+.rem-more{background:none;border:0;padding:0;margin-top:2px;color:var(--gold-deep);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
