@@ -458,11 +458,14 @@ only date + phone, and an Admin's save could silently overwrite a
 colleague's meeting for the same client and day. That can't happen any
 more: nobody, Admins included, can change whose meeting it is.)
 
-**Meeting lists fit the screen.** In Every meeting and the Day view,
-phone, email and address sit in small text under the client's name, and
-remarks get their own full-width line under each meeting, so there's no
-sideways scrolling. Long remarks show two lines with **Show more**; the
-full text is always in the client's history and the Excel download.
+**Meeting lists fit the screen.** Every meeting and the Day view have five
+columns: Date, RM, Client (name, with phone · email · city underneath),
+Meeting (type · first/follow-up · mode, with the source underneath) and
+Outcome (result, lead/docs, follow-up date). Remarks sit on their own line
+under each meeting and wrap to the visible width, so there's no sideways
+scrolling even in a narrow window. Long remarks show two lines with
+**Show more**; the full text is always in the client's history and the
+Excel download.
 
 **How a joint meeting is counted.** When two or more people log the same
 client (same phone) on the same day, each entry is marked **Joint**. Each
