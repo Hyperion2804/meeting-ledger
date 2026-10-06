@@ -1,562 +1,654 @@
-# Meeting Ledger
-
-## Latest update: office timings and holidays
-
-- **One office schedule for everyone** (RMs, Team Leads, Admins,
-  Superadmins): Monday to Saturday 09:30–18:30; Sundays and the 2nd and
-  4th Saturdays of every month are off. It's set once in `config.js`
-  (`OFFICE`). If it ever changes, edit it there and in Hyperion Calendar's
-  `config.js`.
-- **Holidays** are managed in Hyperion Calendar → Holidays (Superadmin
-  adds, every Admin/Superadmin sees the list). Meeting Ledger has no
-  Holidays tab; it reads the same list in the background so every role,
-  RMs and Team Leads included, gets the days off right.
-- **Plan for next working day**: the numeric plan card (was "Tomorrow's
-  plan") now plans for the next working day, so on a Saturday it's
-  Monday, and it skips off-Saturdays and holidays. Master → Day view's
-  target uses the same day.
-- **Soft warnings, never blocking**: picking a follow-up date or a
-  scheduled-meeting date that's a Sunday, an off-Saturday or a holiday
-  shows a note. Day view marks a day off in its heading.
-
-Deploy: publish the new `firestore.rules` first, then upload `app.js`,
-`index.html`, `styles.css`, `config.js` and this README.
-
-## ⚠️ Updating from an earlier version? Do this first
-
-This version changes the role model and the meeting form. If you already
-have data in Firestore, two things need a manual fix right after you
-deploy — nothing else migrates itself.
-
-**1. Merge "Founder" into "Admin."** Founder is no longer a role. Anyone
-whose `users` document still says `role: "founder"` will silently drop to
-RM-level access (only "My meetings," no Master, no Team) the moment you
-publish the new rules. Fix it immediately:
-
-Firebase → **Firestore Database → Data → users** → open each document that
-says `founder` → change the **`role`** field to:
-```
-admin
-```
-
-**2. Add Designation and Employee ID to every existing person.** The
-export now includes both, matching your Mastersheet exactly. On the same
-document, add two new **string** fields:
-```
-designation:  "Founder"          (their real job title — separate from role)
-employeeId:   "HCM/F-005"
-```
-Do this for everyone already in the team list, including yourself. New
-people you add from now on will be asked for these automatically.
-
-**3. Only a Super Admin can manage the team now.** Plain Admins can see
-the Team tab (read-only) but can no longer add, edit, or remove anyone —
-only a Super Admin can. If nobody is currently `role: "superadmin"`, pick
-one existing Admin's document and change their role to `superadmin` the
-same way as step 1.
-
-Do all three, then publish the new `firestore.rules` (Step 3 below) and
-redeploy the app files, in that order.
-
----
-
-
-A small CRM for relationship managers. Each RM logs one row per meeting and sees
-only their own. You see everything, plus the master sheet — and can download it
-as Excel in the same layout as `Format.xlsx`.
-
-No build step, no npm, no framework. Five files. You edit one of them.
-
-- **Sign-in** — your work email, whoever provides it (Microsoft 365, Zoho, cPanel, anything)
-- **Access** — RMs see only their own rows; admins see everything
-- **Hosting** — GitHub Pages, free
-- **Data** — Firebase Firestore, free tier is far more than enough for 5 RMs
-
----
-
-## What you need
-
-A Google account, a GitHub account, and about 30 minutes. No coding.
-
----
-
-## Step 1 — Create the Firebase project
-
-1. Go to <https://console.firebase.google.com> and click **Add project**.
-   Name it whatever you like. You can turn Google Analytics off.
-2. In the left menu open **Build → Firestore Database → Create database**.
-   Pick **Production mode** and a region near you (`asia-south1` for India).
-3. In the left menu open **Build → Authentication → Get started**.
-   Under **Sign-in method** click **Email/Password**, turn on just that one
-   toggle — *Email/Password* — and Save. (Leave *Email link (passwordless
-   sign-in)* off; this app uses passwords, not emailed links.)
-
-## Step 2 — Register the web app and copy the config
-
-1. Click the gear icon → **Project settings**.
-2. Scroll to **Your apps** and click the web icon `</>`.
-3. Give it a nickname, click **Register app**.
-4. You'll see a `firebaseConfig = { ... }` block. Copy it.
-
-Open `config.js` in this repo and replace two things:
-
-```js
-export const ORG_DOMAIN = "yourcompany.com";   // <- your real email domain
-export const firebaseConfig = { ...pasted from Firebase... };
-```
-
-Those API keys are meant to be public — they identify your project, they don't
-grant access. Access is controlled entirely by Step 3.
-
-## Step 3 — Publish the security rules
-
-This is the step that actually protects your data. Don't skip it.
-
-1. Open `firestore.rules` and change one line near the top:
-
-   ```
-   function emailPattern() {
-     return '^[^@]+@yourcompany[.]com$';
-   }
-   ```
-
-   Write your domain with the dots escaped as `[.]` — `acmecapital.com`
-   becomes `^[^@]+@acmecapital[.]com$`.
-
-2. In Firebase go to **Firestore Database → Rules**, delete what's there,
-   paste the whole file in, and click **Publish**.
-
-## Step 4 — Make yourself the Super Admin
-
-The app can't let anyone in until at least one person is on the team list,
-and only a Super Admin can add people or change roles. So create your own
-entry by hand, once.
-
-1. Firebase → **Firestore Database → Data → Start collection**.
-2. Collection ID: `users`
-3. Document ID: **your work email, all lowercase** — e.g. `you@yourcompany.com`
-4. Add six fields:
-
-   | Field         | Type    | Value                    |
-   |---------------|---------|--------------------------|
-   | `email`       | string  | `you@yourcompany.com`    |
-   | `name`        | string  | `Your Name`              |
-   | `designation` | string  | `Founder` (your real title — shows up on every export) |
-   | `employeeId`  | string  | `HCM/001` (anything you like) |
-   | `role`        | string  | `superadmin`             |
-   | `active`      | boolean | `true`                   |
-
-5. Save. From now on you add everyone else from the **Team** tab inside the
-   app — but only someone whose role is `superadmin` will see the option to
-   add people. A plain `admin` sees everything else (Master, every meeting,
-   the team roster) but can't add, edit, or remove anyone.
-
-## Step 5 — Put it on GitHub Pages
-
-1. Create a new repository on GitHub. Public is fine.
-2. Upload every file in this folder to the root of the repo
-   (`index.html`, `styles.css`, `app.js`, `config.js`, `firestore.rules`, `README.md`).
-3. In the repo go to **Settings → Pages**.
-   Under **Source** pick **Deploy from a branch**, branch `main`, folder `/ (root)`. Save.
-4. Wait a minute. Your app is live at
-   `https://<your-username>.github.io/<repo-name>/`
-
-## Step 6 — Let Firebase trust that address
-
-1. Firebase → **Authentication → Settings → Authorised domains → Add domain**.
-2. Add `<your-username>.github.io`.
-
-Open the URL, sign in with your work account, and you should land on the master
-sheet. Then go to **Team** and add your five RMs.
-
----
-
-## How the RMs use it
-
-They open the same URL on their phone, type their work email, and choose a
-password. The first time a work email signs in, the app creates the account
-automatically and sends a confirmation email — they open it, click the link,
-come back, and they're in. After that it's just email + password, like any
-normal login. If someone forgets their password, **Set or reset my password**
-sends a reset link.
-
-Once in, they land on a single screen: a form on top, their month
-underneath. One row per meeting. They never see anyone else's numbers, and
-there's nothing to email you.
-
-If someone signs in before you've added them to the team list, they get a
-polite "not set up yet" screen rather than an error.
-
----
-
-## How you use it
-
-**Master** has two sub-tabs. **Dashboard** is the visual view — the stat
-strip and the four charts (trend, by-RM, by-type, result split). **Sheets**
-is the data view — the funnel, Plan vs Achievement, and the by-relationship-manager
-and day-by-day breakdowns. Both of those are now three stacked tables each
-(Wealth Manager, Channel Partner, Investor) instead of one very wide table,
-so nothing needs sideways scrolling. **Download Excel** gives you a workbook
-with three tabs: `Master` (daily totals across everyone), `Data` (one row
-per person per day, in the exact column order as your Mastersheet's `Data`
-tab — including Designation and Employee ID), and `All Meetings` (every row,
-including the reference name and not-interested reason, but never the
-leads). Everything — on-screen and downloaded — follows whichever date range
-is currently selected, month or custom.
-
-**Download leads** — a second button, visible only to Admin and Super Admin.
-Every lead a Wealth Manager or Channel Partner has shared, with name, phone,
-and meeting status, for whichever range is selected. This never appears in
-the regular Download Excel.
-
-**My meetings** — log your own meetings, set tomorrow's plan, and see
-everything with a follow-up date due this week, all in one sidebar that
-stays put while the meeting list on the right scrolls past it.
-
-**Team** — Super Admin can add people, change anyone's role (RM, Observer,
-Admin, or Super Admin), and remove or restore access. Removing access keeps
-their history; it just stops them signing in. Admin and Observer both see
-the same table, read-only — no add form, no role dropdowns, no remove
-buttons.
-
-**Observer** is a fourth role: Master and Team only, both read-only, but
-downloads work normally (Download Excel, Download leads). No "My meetings"
-tab — an Observer never logs a meeting, and the database refuses one even
-if someone tried to force it through the browser console.
-
----
-
-## Rules of the road
-
-**Travel Plan is a real approval workflow.** File one from My meetings →
-Travel plan — destination, dates, meetings/events planned, optional
-remarks. It's genuinely hierarchical: an RM's plan goes to whoever they
-report to; a Team Lead's plan (they have no manager of their own) and
-anyone's whose reporting line isn't set yet both fall to the same place —
-any Admin or Superadmin can decide it. Admin and Superadmin also approve
-**each other's** plans, since neither sits above the other. Decisions
-happen on the new **Approvals** tab, visible only to Team Lead, Admin,
-and Superadmin — never RM, never Observer.
-
-**Click a name to see their history.** The separate "History" button is
-gone from every table — the person's name itself is now the trigger,
-on My History, Master's Every Meeting, and Day view alike.
-
-**A soft warning on likely duplicate First meetings.** Pick "First" and
-enter a phone number that already has meetings on record, and a plain
-amber note appears — "Did you mean Follow-up?" It never blocks saving;
-it's there so the choice is deliberate, not a slip.
-
-**Weekly Plan is different from the daily numbers plan.** "Tomorrow's Plan"
-on the Log tab is still just counts. **Weekly Plan** (its own sub-tab, next
-to Leads) is the real thing — who you intend to meet, where, and why,
-before it happens. Anyone who can log a meeting can add one. Click **"Log
-this meeting"** on a planned entry and it opens the real meeting form
-pre-filled with the name, person type, phone if you gave one, and location
-— finish the rest (Mode, Source, Result) and save as usual. The plan entry
-marks itself Done the moment you do.
-
-Same visibility as everywhere else: your own plan is yours, Team Lead sees
-their reports' too, and Master gets its own **Weekly Plan** sub-tab showing
-everyone's — Admin, Superadmin, and Observer included.
-
-**The Weekly plan tab has two halves.**
-
-*Meetings scheduled* (the form on the left and the list beside it) is
-every meeting you're planning. A confirmed day can also have an optional
-**time** — Hyperion Calendar then shows the meeting at that time (as a
-one-hour block) instead of as an all-day item. If the day isn't fixed yet, tick **Day not
-confirmed yet** and pick any day in that week: it's saved as "Week of
-28-09-2026 · day TBC", location becomes optional, and a **Set date**
-button appears for when the day firms up (location is asked for then if
-it's still blank). A plan can slip into a later week; setting the date
-moves it. "Log this meeting" works on either kind — a day-TBC plan logs
-as today. Observer sees all meetings scheduled, confirmed or not.
-
-*Weekly planner* (the card at the top) is for the week's work that isn't a
-meeting — postings, listings, emails, planning. Type one item per line, or
-paste a whole numbered list; each line becomes its own item and the
-"1." / "2." numbering is stripped. Use ‹ › to plan ahead. If a meeting
-lands in the planner, **Move to meetings** opens the meeting form
-pre-filled with the text and "day not confirmed" ticked; the planner item
-is removed only when you save (in the same write, so it's never in both
-or lost). "Keep it in the planner" cancels.
-
-**"Going with" on a planned meeting.** Defaults to *Alone*. Switch it to
-*With colleagues* and tick who's coming — any active RM, Team Lead, Admin
-or Super Admin. The meeting then shows in each of their Meetings
-scheduled lists (tagged *Going along*, with who planned it) and on their
-Hyperion Calendar. It stays one meeting: only the person who planned it
-can set the date, log it, mark it done or remove it, and it counts once
-on Master, where a **Going with** column shows who went along.
-**Republish `firestore.rules`** for this — every member can now list the
-team (needed to pick names), and people going along can read the meeting.
-
-**Hyperion Calendar is now for everyone (except Observer).** To let
-colleagues see that someone is busy without seeing who they're meeting,
-Meeting Ledger now also writes a small `busySlots` record (who, when,
-status, no client details) whenever a meeting is planned, its date is
-set, it's marked done or removed, and whenever a trip is approved or
-rejected. If that write ever fails it doesn't block the save; an Admin
-opening the calendar repairs it. **Republish `firestore.rules`** for this.
-
-**Marking a planner item done asks what was done** — same as a day task
-in Hyperion Calendar. "What was done" is required; **Next step** is
-optional. If you add one, pick any day in the week it belongs to and it
-lands there as a new Open item, showing "Next step from: …". The done
-note and next step show under the item, and in the History column on
-Master → Weekly plan. **Mark open** clears the note; a next step already
-created stays in its week (remove it there if it's not needed). No rule
-changes needed — `firestore.rules` already allows these fields.
-
-**Nothing in the planner moves between weeks on its own.** Once a week
-ends it's read-only, and its open items get **Carry to this week** (or
-"Carry all"). Carrying marks the original *Carried* — so the old week
-still shows honestly what didn't get done — and puts an Open copy in the
-current week that remembers where it came from and when it was first
-planned. If anything is still open from earlier weeks, the current week
-shows a reminder with a **Review** link.
-
-**Observer can't see the planner at all** — it's internal working notes,
-and like Leads that's enforced in `firestore.rules`, not just hidden on
-screen. Everyone else sees it with the usual scope (Team Lead: own +
-reports; Admin/Superadmin: everyone) in the **Weekly planner** table on
-Master → Weekly plan, which has its own week arrows. The planner lives in
-its own collection (`weekAgendas`).
-
-**Follow-ups: log them in one click, and see which are done.** In the
-"Follow-ups this week" card, each meeting follow-up has a **Log follow-up**
-button. It opens the meeting form as a new *Follow-up* meeting dated today,
-with the person's details carried over (name, type, phone, email, address,
-source, reference; WM/CP are linked to the same registered contact, looked
-up fresh). How the conversation went — mode, result, remarks, next
-follow-up date — is left for you to fill in; nothing from last time is
-copied into it. The original meeting isn't changed.
-
-A meeting counts as **followed up** once any later meeting with the same
-phone number is logged (an early follow-up counts). The Follow-up column in
-My history, Master → Every meeting and Day view shows "✓ Followed up
-<date>", or **Overdue** if the date has passed with nothing logged since —
-so Team Lead, Admin, Superadmin and Observer see the same status the RM
-does. Downloads are unchanged.
-
-**Day planner → moved to Hyperion Calendar.** The Superadmin day planner
-now lives in the separate Hyperion Calendar app (same Firebase project,
-same logins). Its tasks are in the same `dayTasks` collection, so nothing
-was lost in the move. The calendar also shows each Admin/Superadmin's
-office timings, availability, scheduled meetings and approved travel.
-
-**Master → Travel plans** lists every trip in scope for the chosen month
-(a trip shows in every month its dates touch), with status and who
-decided it. View-only — Approve and Reject stay on the Approvals tab.
-Observer can see it.
-
-Reminder emails (when the reminders workflow is deployed) don't include
-planner items. The reminders script also needs a small change before it
-goes live: as written, it would treat a day-TBC meeting's blank date as
-overdue.
-
-**Email is optional now.** Everything else on the form is still required;
-email is checked for a valid format only if something's actually typed.
-
-**Editing lives on My History, not the Log page.** The compact list under
-"Your month" is now view-only — click into **My history** to correct a
-past entry. There's no Delete button anywhere for RMs; a mistake gets
-corrected by editing it, not erased.
-
-**Contacts has a second sub-tab: Investors.** Unlike Wealth Managers and
-Channel Partners, Investors don't get an ID or a New/Existing flow — this
-tab is just a live, deduplicated list built from meetings already logged,
-one row per person, most recent meeting's details shown. Same visibility
-as everywhere else: your own, your reports' if you're a Team Lead, everyone
-else's if you're Admin/Superadmin/Observer.
-
-**A WM/CP meeting defaults sensibly.** First meeting defaults to New,
-Follow-up defaults to Existing — since a follow-up almost always means you
-already know this contact. Either way it's just a starting point; pick the
-other one any time, and once you do, changing the meeting type afterward
-won't silently flip it back.
-
-**Team Lead** is a fifth role, between RM and Admin. From the Team tab,
-Super Admin assigns an RM's **"Reports to"** to a Team Lead. That Team Lead
-then sees Master, Contacts, and Leads scoped to themselves plus their
-direct reports only — never the whole company. They can log their own
-meetings, same as Admin, but have no power to manage the team or edit
-anyone else's records.
-
-**Editing an existing team member.** Super Admin can now correct someone's
-name, designation, or employee ID directly in the Team tab — click into
-the field, type, click away, it saves. Email stays fixed; it's how someone
-signs in and how every past meeting is attributed to them.
-
-**Deleting a contact.** Super Admin can remove a Wealth Manager or Channel
-Partner from the registry entirely. History is untouched — meetings and
-leads that already reference it keep their own saved details. Deleting
-only means it can no longer be selected as "Existing" going forward.
-
-**Rescheduling.** Change a follow-up date (or a Pending lead's expected
-date) on an existing entry, and the *original* date is preserved
-underneath — you'll see "Rescheduled from X → Y" wherever that entry
-shows up. Reschedule it again later and it still points back to the true
-original, not whatever it most recently was.
-
-**Wealth Manager / Channel Partner contacts have a registry now.** Pick
-either segment on the form and you'll be asked New or Existing. New — fill
-in the details as before, and the app generates an ID like `CP-9876543210`
-(the prefix plus their phone number — always unique, never needs a manual
-counter). Existing — type that ID, hit Find, and their name/phone/email/
-address fill in on their own, read-only.
-
-**The same phone can only be registered once, ever, by anyone.** If a
-different RM already registered that number, you'll see "This contact is
-already registered. Check with your admin." — nothing gets saved, including
-the meeting itself. Re-saving your own contact's details is fine; that's
-treated as a correction.
-
-**Contacts are visible more widely than leads.** Everyone sees only their
-own contacts and leads — except Admin, Superadmin, and **Observer**, who
-see every contact on file. Leads (the actual people a contact introduced)
-are more sensitive: only Admin and Superadmin see everyone's; Observer sees
-none, enforced by the database itself, not just hidden on screen.
-
-**Only a Super Admin can transfer a contact.** From the Contacts tab, enter
-the new owner's employee ID. Past meetings and leads keep the original RM's
-name on them — a transfer only changes who owns the contact going forward.
-
-**Every lead needs a date, whichever status it has.** Meeting Done — the
-date it happened. Pending — the date it's expected. Both feed the
-Follow-ups list on "My meetings," alongside meetings with their own
-follow-up date. Use the ‹ › arrows to check other weeks, or "This week" to
-jump back to today.
-
-**One meeting = one reachout.** First meetings and follow-ups both count. The
-master shows the split.
-
-**Lead / docs shared** means leads for Wealth Managers and Channel Partners,
-documents for Investors. The form relabels itself when you pick the type.
-
-**Every field is mandatory.** The form won't submit until it's all filled —
-phone, email, address, source, result, follow-up date, remarks, all of it.
-The one exception is **follow-up date on a Not Interested meeting**: there's
-nothing to follow up, so it's optional there (you can still set one if you
-genuinely plan to revisit). The Excel importer follows the same rule.
-Fields that don't apply yet (like the Not Interested reason, or the Reference
-name) simply don't appear until they're relevant, and switch off again if you
-change your mind.
-
-**Shared and progressed only make sense once someone's Interested.** If the
-result isn't Interested, the Lead/Docs Shared field is switched off. If a
-lead or document wasn't actually shared yet ("Not yet" or "No"), Meeting
-Done/Logged In switches off too — there's nothing to be done or pending yet.
-
-**Two people can log the same client on the same day.** Each meeting is
-saved per person (date + phone + who logged it), so if two of you meet the
-same client — together or separately — each keeps their own entry and
-both count on Master. Saving your own entry again for the same phone and
-date is treated as a correction, not a duplicate. (Previously the ID was
-only date + phone, and an Admin's save could silently overwrite a
-colleague's meeting for the same client and day. That can't happen any
-more: nobody, Admins included, can change whose meeting it is.)
-
-**Meeting lists fit the screen.** Every meeting and the Day view have five
-columns: Date, RM, Client (name, with phone · email · city underneath),
-Meeting (type · first/follow-up · mode, with the source underneath) and
-Outcome (result, lead/docs, follow-up date). Remarks sit on their own line
-under each meeting and wrap to the visible width, so there's no sideways
-scrolling even in a narrow window. Long remarks show two lines with
-**Show more**; the full text is always in the client's history and the
-Excel download.
-
-**How a joint meeting is counted.** When two or more people log the same
-client (same phone) on the same day, each entry is marked **Joint**. Each
-person's entry counts in *their own* numbers (per-person tables, Plan vs
-Achievement, their own month). **Firm-wide totals count it once**, using
-the first entry logged: the stat grid, dashboard and charts, the funnel,
-the day-by-day tables, the "All RMs" total rows, and the `Master` tab of
-the Excel download. So per-person totals can add up to more than the firm
-total; Master says so when it happens. On screen (Every meeting, and the
-Day view's meeting list) a joint meeting is **one row**: the people are
-joined ("Ankur Rastogi & Chiranjib Das", first logger first) with a
-**Joint** tag, and any field they logged differently, remarks, result,
-follow-up and so on, shows each person's value labelled with their
-name. The `All Meetings` tab in Excel keeps one row per person (with a
-"Joint meeting" column), since each has their own designation and
-employee ID. A lead recorded by both people from the same
-joint meeting shows once on Master and in Download leads.
-
-**Meeting dates can't be in the future.** The date picker won't let you go
-past today, and the app checks again on save regardless.
-
-**Leads shared by a Wealth Manager or Channel Partner are kept separate.**
-When Lead/Docs Shared = Yes for a WM or CP meeting, you can list each lead's
-name, phone, and whether the follow-up meeting happened. These names and
-numbers never appear in the regular **Download Excel** — only in the
-separate **Download leads** button, which only Admin and Super Admin ever
-see.
-
-**Tomorrow's plan, and how it's checked.** Everyone — RM, Admin, or Super
-Admin — can log how many meetings they plan to do tomorrow, from the small
-card under the meeting form. On Master, **Plan vs achievement** compares
-like with like: a person's meetings count against their plan **only on
-days they filed a plan for**. Achievement % = meetings on planned days ÷
-meetings planned. Two more columns keep it honest: **Days planned**
-(e.g. 3 / 22 working days so far in the range) and **Unplanned meetings**
-(meetings on days with no plan, shown but not counted toward %). Before,
-every meeting in the month was compared against only the days that had a
-plan, so one small plan plus a month of meetings could show 800%.
-
-**Date range, month or custom.** By default Master shows the selected month —
-funnel, dashboard, achievement, both segment-table sections, every meeting,
-all of it. Fill in the two date fields next to the month picker and the
-*entire view* switches to that exact range instead, live, not just the
-downloads. Picking a month again clears any custom range so it's never
-ambiguous which one is active. Neither can go into the future: the month
-picker stops at the current month, "from" and "to" stop at today, and "to"
-can never sit before "from."
-
-**Only "Yes" counts as shared.** "Not yet" and "No" both land in Not Shared.
-
----
-
-## If something goes wrong
-
-**"Missing or insufficient permissions"** — the rules aren't published, or your
-`users` document ID isn't your email in lowercase, or `active` was saved as the
-text `"true"` instead of the boolean `true`.
-
-**The confirmation email never arrives** — check spam first (it comes from
-Firebase, not a familiar sender, so filters are often suspicious of the
-first one). Then check that your GitHub Pages domain is in authorised
-domains (Step 6).
-
-**"This web address isn't authorised"** — your GitHub Pages domain isn't in
-Firebase's authorised domains (Step 6).
-
-**"Confirm your email address" screen won't go away** — open the
-confirmation email, click the link, then reload the app.
-
-**"That email and password don't match"** on a first-ever sign-in — this
-should self-correct automatically (the app creates the account behind the
-scenes). If it doesn't, make sure *Email/Password* sign-in is switched on in
-Firebase (Step 1.3).
-
-**"Use your @company account"** — `ORG_DOMAIN` in `config.js` doesn't match the
-address being used. It's just the domain, no `@`.
-
-**Everything loads but no data** — check you're looking at the right month. The
-month picker defaults to the current one.
-
----
-
-## What this costs
-
-Nothing, at your size. Firebase's free tier covers 50,000 document reads a day;
-five RMs logging meetings will use a few hundred. GitHub Pages is free. You'll
-only ever pay if this grows into the hundreds of users.
-
-## Where it goes next
-
-Right now every RM's meetings load in one go, which is perfect up to a few
-thousand rows. Past that you'd want to paginate by month. When you get there,
-the change is in `loadMeetings()` — add a `where("date", ">=", ...)` and
-Firestore will prompt you for the one index it needs.
+/* ============================================================
+   Meeting Ledger — visual system
+   Hyperion Capital Managers palette, sampled from the logo:
+   warm ink #1C140A · warm paper #FBF8F2 · brand gold #B8862F
+   Status colors (green/amber/rust) stay semantic, independent of brand.
+   Newsreader (display) · Public Sans (ui) · IBM Plex Mono (data)
+   ============================================================ */
+
+:root{
+  --ink:#1C140A;
+  --ink-2:#2E2013;
+  --ink-3:#6B5A44;
+  --rule:#E3D9C8;
+  --rule-soft:#EFE8DB;
+  --paper:#FBF8F2;
+  --paper-2:#FFFFFF;
+
+  /* Permanently dark brand chrome (topbar, sign-in aside, toast) —
+     deliberately NOT --ink. --ink is a text color and correctly flips
+     light/dark with the theme; this stays the same fixed dark surface
+     in both themes, same as a logo never changes color with the page
+     around it. */
+  --brand-dark:#1C140A;
+
+  /* brand — extracted from the Hyperion logo's metallic gradient */
+  --gold-deep:#7A4A12;
+  --gold-mid:#8A5518;    /* darker than --gold — safe for white text, used in gradients/solid fills that carry text */
+  --gold:#B8862F;        /* brighter — decorative only (chart fills, borders, focus rings), never behind white text */
+  --gold-2:#D4A94F;
+  --gold-wash:#F4E9D1;
+
+  /* status — semantic only, deliberately NOT brand colors */
+  --green:#1B4D3E;
+  --green-wash:#EBF1EE;
+  --amber:#9C6B15;
+  --amber-wash:#FBF2E2;
+  --rust:#8F3A2C;
+  --rust-wash:#F8EBE8;
+
+  /* decorative only — verified from the real investor deck. Never used
+     for status; rust alone carries that meaning, everywhere, always. */
+  --terracotta:#CB513B;
+
+  /* the deck's real primary blue, read directly from its slide XML
+     (srgbClr, 27 uses across headline/stat text). Used sparingly — one
+     emphasis moment, not a repaint. White text carries fine on this fill
+     in both themes, so — like gold-deep/gold-mid — it doesn't need a
+     separate dark-mode value. */
+  --deck-navy:#1F497D;
+
+  --f-display:"Newsreader",Georgia,serif;
+  --f-ui:"Public Sans",system-ui,-apple-system,sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+
+  --sp:8px;
+  --r:10px;
+  --shadow:0 1px 2px rgba(28,20,10,.06),0 8px 24px -16px rgba(28,20,10,.30);
+}
+
+/* ============================================================
+   Dark theme — toggled via [data-theme="dark"] on <html>, not just an
+   inversion. Button fills (gold-deep/gold-mid) stay the same in both
+   themes: they carry white text regardless of page background, so their
+   contrast is already theme-independent. Everything else — text on page,
+   borders, and every status wash — is re-picked for real dark-background
+   contrast, not flipped.
+   ============================================================ */
+:root[data-theme="dark"]{
+  --ink:#F3ECE1;
+  --ink-2:#E4D9C8;
+  --ink-3:#A89878;
+  --rule:#3D3222;
+  --rule-soft:#2E2519;
+  --paper:#17120C;
+  --paper-2:#211A11;
+
+  --gold:#D4A94F;          /* brightened — the light-mode value reads too muted on a dark surface */
+  --gold-2:#E3BD70;
+  --gold-wash:#3A2C15;
+
+  --green:#5FB39A;
+  --green-wash:#16332A;
+  --amber:#D9A648;
+  --amber-wash:#3D2E10;
+  --rust:#D9705C;
+  --rust-wash:#3D1F19;
+
+  --shadow:0 1px 2px rgba(0,0,0,.30),0 8px 24px -16px rgba(0,0,0,.55);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--f-ui);
+  font-size:15px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.01em}
+p{margin:0}
+em{font-style:normal;color:var(--ink-3);font-weight:400}
+
+.display{font-family:var(--f-display);font-weight:500;font-size:30px;line-height:1.15;letter-spacing:-.02em}
+.lede{color:var(--ink-3);font-size:14px}
+.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+/* ---------------- boot ---------------- */
+.boot{
+  position:fixed;inset:0;display:grid;place-content:center;justify-items:center;
+  gap:14px;background:var(--paper);z-index:60;color:var(--ink-3);font-size:13px;
+}
+.boot-mark{
+  width:38px;height:38px;border-radius:9px;background:var(--brand-dark);color:var(--paper);
+  display:grid;place-items:center;font-family:var(--f-data);font-size:13px;font-weight:600;
+  animation:pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ---------------- brand ---------------- */
+.brand{display:flex;align-items:center;gap:9px}
+.brand-mark{
+  width:28px;height:28px;border-radius:7px;background:var(--gold-deep);color:#fff;
+  display:grid;place-items:center;font-family:var(--f-data);font-size:11px;font-weight:600;
+  letter-spacing:.02em;flex:none;
+}
+.brand-name{font-weight:600;font-size:14px;letter-spacing:-.01em}
+
+/* ---------------- sign in ---------------- */
+.signin{min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.signin-panel{
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+  gap:18px;padding:clamp(28px,6vw,80px);
+}
+.signin-panel h1{font-family:var(--f-display);font-weight:500;font-size:clamp(34px,4.6vw,54px);line-height:1.08;letter-spacing:-.025em}
+.signin-error{
+  font-size:13px;color:var(--rust);background:var(--rust-wash);
+  border:1px solid #E9CFC9;border-radius:var(--r);padding:10px 12px;
+}
+.signin-foot{font-size:12.5px;color:var(--ink-3);margin-top:4px}
+.signin-aside{background:var(--brand-dark);display:grid;place-items:center;padding:40px}
+.funnel-demo{width:min(100%,360px);display:grid;gap:10px}
+.fd-band{
+  width:var(--w);min-width:180px;background:linear-gradient(90deg,var(--gold-mid),var(--gold-deep));
+  border-radius:8px;padding:14px 16px;color:#fff;display:flex;align-items:baseline;
+  justify-content:space-between;gap:12px;
+  animation:grow .8s cubic-bezier(.2,.7,.2,1) backwards;
+}
+.fd-band:nth-child(2){animation-delay:.1s;opacity:.9}
+.fd-band:nth-child(3){animation-delay:.2s;opacity:.78}
+.fd-band:nth-child(4){animation-delay:.3s;opacity:.66}
+.fd-band span{font-size:12px;letter-spacing:.02em;opacity:.85;white-space:nowrap}
+.fd-band b{font-family:var(--f-data);font-size:17px;font-weight:600}
+@keyframes grow{from{width:0;opacity:0}}
+
+/* ---------------- topbar ---------------- */
+.topbar{
+  position:sticky;top:0;z-index:30;background:var(--brand-dark);color:#fff;
+  display:flex;align-items:center;gap:20px;padding:10px clamp(14px,3vw,28px);
+}
+.topbar .brand-name{color:#fff}
+.tabs{display:flex;gap:2px;margin-right:auto;flex-wrap:wrap}
+.tab{
+  background:none;border:0;color:rgba(255,255,255,.62);font:inherit;font-size:13px;font-weight:500;
+  padding:7px 12px;border-radius:7px;cursor:pointer;
+}
+.tab:hover{color:#fff;background:rgba(255,255,255,.08)}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--paper)}
+.who{display:flex;align-items:center;gap:10px}
+.who-name{font-size:13px;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.theme-toggle{
+  background:none;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.85);
+  font-size:14px;line-height:1;width:30px;height:30px;border-radius:7px;
+  cursor:pointer;display:grid;place-items:center;flex-shrink:0;
+}
+.theme-toggle:hover{background:rgba(255,255,255,.1);color:#fff}
+.chip{
+  font-family:var(--f-data);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.13);color:#fff;white-space:nowrap;
+}
+
+/* ---------------- pages ---------------- */
+.page{padding:clamp(18px,3vw,32px);max-width:1360px;margin:0 auto}
+.page-split{display:grid;grid-template-columns:400px minmax(0,1fr);gap:20px;align-items:start}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.page-head-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;row-gap:10px}
+
+.pending{max-width:520px;margin:14vh auto;text-align:center;display:grid;gap:12px;padding:0 20px}
+.pending h2{font-family:var(--f-display);font-weight:500;font-size:26px}
+.pending p{color:var(--ink-3);font-size:14px}
+.pending .btn{justify-self:center}
+
+/* ---------------- cards ---------------- */
+.card{
+  background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--r);
+  box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden;
+}
+.page-split .card{margin-bottom:0}
+.form-card{position:sticky;top:76px}
+.log-right{display:flex;flex-direction:column;gap:20px;min-width:0}
+.log-right-sticky{display:flex;flex-direction:column;gap:20px}
+.list-head-card{margin-bottom:0}
+.list-card{padding-top:4px}
+.card-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 16px;border-bottom:1px solid var(--rule-soft);
+}
+.card-head h2{font-size:14px;letter-spacing:-.005em}
+.card-note{font-size:12px;color:var(--ink-3)}
+
+/* ---------------- forms ---------------- */
+.form{padding:16px;display:grid;gap:12px}
+.form-inline{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));align-items:end}
+.row-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:grid;gap:5px;min-width:0}
+.field>span{font-size:12px;font-weight:600;color:var(--ink-2);letter-spacing:.01em}
+input,select,textarea{
+  font:inherit;font-size:14px;color:var(--ink);background:var(--paper-2);
+  border:1px solid var(--rule);border-radius:8px;padding:9px 10px;width:100%;
+  transition:border-color .12s,box-shadow .12s;
+}
+textarea{resize:vertical;line-height:1.45}
+input:hover,select:hover,textarea:hover{border-color:#C9C3B8}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-wash);
+}
+select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%234A515E' d='M6 8.5 2.5 5h7z'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+.month-input{width:auto;font-family:var(--f-data);font-size:13px;padding:7px 10px}
+.form-actions{display:flex;gap:8px;margin-top:2px}
+.form-error{
+  font-size:13px;color:var(--rust);background:var(--rust-wash);
+  border:1px solid #E9CFC9;border-radius:8px;padding:9px 11px;
+}
+
+/* ---------------- buttons ---------------- */
+.btn{
+  font:inherit;font-size:14px;font-weight:600;letter-spacing:-.005em;
+  border-radius:8px;padding:9px 15px;border:1px solid transparent;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:background .12s,color .12s,border-color .12s,transform .08s;
+}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--gold-deep);color:#fff}
+.btn-primary:hover{background:#5C350E}
+.btn-ghost{background:transparent;border-color:var(--rule);color:var(--ink-2)}
+.btn-ghost:hover{background:var(--paper);border-color:#C9C3B8}
+.topbar .btn-ghost{border-color:rgba(255,255,255,.22);color:rgba(255,255,255,.8)}
+.topbar .btn-ghost:hover{background:rgba(255,255,255,.1);color:#fff}
+.btn-sm{font-size:13px;padding:7px 12px}
+.btn-lg{font-size:15px;padding:12px 20px}
+.btn-link{background:none;border:0;font:inherit;font-size:12.5px;font-weight:600;color:var(--gold-deep);cursor:pointer;padding:2px 4px;border-radius:5px}
+.btn-link:hover{background:var(--gold-wash)}
+.btn-link.danger{color:var(--rust)}
+.btn-link.danger:hover{background:var(--rust-wash)}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+/* ---------------- the funnel (signature) ---------------- */
+.funnel{
+  background:var(--brand-dark);border-radius:var(--r);padding:22px clamp(16px,3vw,28px);
+  margin-bottom:20px;box-shadow:var(--shadow);
+}
+.funnel-bands{display:grid;gap:9px}
+.f-band{
+  position:relative;width:var(--w);min-width:200px;border-radius:8px;
+  padding:13px 16px;display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+  background:linear-gradient(90deg,var(--gold-mid),var(--gold-deep));color:#fff;
+  animation:grow .7s cubic-bezier(.2,.7,.2,1) backwards;
+}
+.f-band .f-label{font-size:12.5px;letter-spacing:.015em;opacity:.86;white-space:nowrap}
+.f-band .f-num{font-family:var(--f-data);font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.f-band .f-pct{
+  font-family:var(--f-data);font-size:11px;opacity:.7;position:absolute;
+  left:calc(100% + 10px);top:50%;transform:translateY(-50%);color:rgba(255,255,255,.55);white-space:nowrap;
+}
+.f-band:nth-child(2){opacity:.9}
+.f-band:nth-child(3){opacity:.79}
+.f-band:nth-child(4){opacity:.68}
+.funnel-empty{color:rgba(255,255,255,.5);font-size:13px;padding:6px 2px}
+
+/* ---------------- tables ---------------- */
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.grid{border-collapse:collapse;width:100%;font-size:13.5px}
+.grid th,.grid td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--rule-soft);white-space:nowrap}
+.grid thead th{
+  font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+  background:var(--paper);position:sticky;top:0;z-index:1;border-bottom:1px solid var(--rule);
+}
+.grid tbody tr:hover{background:var(--paper)}
+.grid td.num,.grid th.num{text-align:right;font-family:var(--f-data);font-variant-numeric:tabular-nums}
+.grid td.name{font-weight:600;white-space:normal;min-width:150px}
+.name-link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);cursor:pointer;text-align:left}
+.name-link:hover{color:var(--gold-deep);text-decoration:underline}
+.grid td.wrap{white-space:normal;min-width:220px;color:var(--ink-3);font-size:13px}
+.grid tfoot td{font-weight:700;background:var(--paper);border-top:1px solid var(--rule);border-bottom:0}
+.grid-dense th,.grid-dense td{padding:7px 9px;font-size:12.5px}
+.grid .group-head th{
+  text-transform:none;letter-spacing:.02em;font-size:11px;color:var(--ink);
+  background:var(--rule-soft);text-align:center;border-bottom:1px solid var(--rule);
+}
+.zero{color:#C4BEB3}
+
+.tag{
+  display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:5px;
+  letter-spacing:.01em;white-space:nowrap;
+}
+.tag-green{background:var(--green-wash);color:var(--green)}
+.tag-amber{background:var(--amber-wash);color:var(--amber)}
+.tag-rust{background:var(--rust-wash);color:var(--rust)}
+.tag-flat{background:var(--rule-soft);color:var(--ink-3)}
+
+/* ---------------- RM strip + list ---------------- */
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:1px;background:var(--rule-soft)}
+.stat{background:var(--paper-2);padding:13px 14px}
+.stat b{display:block;font-family:var(--f-data);font-size:22px;font-weight:600;line-height:1.1}
+.stat span{font-size:11px;color:var(--ink-3);letter-spacing:.02em}
+.list{max-height:62vh;overflow-y:auto}
+.followups-list{max-height:280px;overflow-y:auto}
+.followups-empty{padding:16px;text-align:center;color:var(--ink-3);font-size:13px}
+.fu-item{padding:11px 14px;border-bottom:1px solid var(--rule-soft);display:grid;gap:3px}
+.fu-item:last-child{border-bottom:0}
+.fu-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fu-name{font-weight:600;font-size:13.5px}
+.fu-date{font-family:var(--f-data);font-size:12px;color:var(--gold-deep);font-weight:600}
+.fu-meta{font-size:12px;color:var(--ink-3)}
+.day-head{
+  position:sticky;top:0;background:var(--paper);z-index:1;
+  padding:7px 16px;font-family:var(--f-data);font-size:11px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  border-top:1px solid var(--rule-soft);border-bottom:1px solid var(--rule-soft);
+}
+.entry{padding:13px 16px;border-bottom:1px solid var(--rule-soft);display:grid;gap:6px}
+.entry:hover{background:var(--paper)}
+.entry-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.entry-name{font-weight:600;font-size:14.5px}
+.entry-meta{font-size:12.5px;color:var(--ink-3)}
+.entry-remarks{font-size:13px;color:var(--ink-3);line-height:1.45}
+.entry-actions{display:flex;gap:2px;margin-left:auto}
+.empty{padding:34px 16px;text-align:center;color:var(--ink-3);font-size:13.5px}
+.empty::before{
+  content:"";display:block;width:34px;height:34px;margin:0 auto 10px;
+  border-radius:50%;border:1.5px dashed var(--terracotta);opacity:.55;
+}
+
+/* ---------------- toast ---------------- */
+.toast{
+  position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;
+  background:var(--brand-dark);color:#fff;font-size:13.5px;font-weight:500;
+  padding:11px 18px;border-radius:9px;box-shadow:0 10px 30px -10px rgba(0,0,0,.45);
+  animation:rise .22s ease backwards;max-width:90vw;text-align:center;
+}
+@keyframes rise{from{opacity:0;transform:translate(-50%,8px)}}
+
+/* ---------------- responsive ---------------- */
+@media (max-width:1020px){
+  .page-split{grid-template-columns:1fr}
+  .form-card{position:static}
+  .log-right{position:static;max-height:none;overflow:visible}
+  .list{max-height:none}
+}
+@media (max-width:760px){
+  .signin{grid-template-columns:1fr}
+  .signin-aside{order:-1;padding:28px 22px}
+  .signin-panel{padding:28px 22px 44px}
+  .topbar{flex-wrap:wrap;gap:10px}
+  .tabs{order:3;width:100%;margin-right:0}
+  .who-name{display:none}
+  .row-2{grid-template-columns:1fr}
+  .f-band .f-pct{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important}
+}
+
+/* month-total row in the day-by-day grid */
+.grid tr.is-total td{
+  font-weight:700;background:var(--paper);
+  border-top:1px solid var(--rule);border-bottom:0;
+}
+.grid tr.is-total td.zero{color:var(--ink-3)}
+
+/* sign-in form */
+.signin-form{display:grid;gap:12px;width:min(100%,380px)}
+.signin-alt{display:flex;gap:14px;flex-wrap:wrap}
+.signin-note{
+  font-size:13px;color:var(--green);background:var(--green-wash);
+  border:1px solid #CFE0D8;border-radius:var(--r);padding:10px 12px;width:min(100%,380px);
+}
+.signin .signin-error{width:min(100%,380px)}
+.verify-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+
+/* ---------------- dashboard: stat strip + charts ---------------- */
+.dash-strip{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:var(--r);
+  overflow:hidden;margin-bottom:20px;box-shadow:var(--shadow);
+}
+.dash-strip .dstat{background:var(--paper-2);padding:16px 18px}
+.dash-strip .dstat b{
+  display:block;font-family:var(--f-data);font-size:26px;font-weight:600;
+  line-height:1.1;letter-spacing:-.01em;
+}
+.dash-strip .dstat span{font-size:11.5px;color:var(--ink-3);letter-spacing:.02em}
+.dash-strip .dstat.accent{background:var(--gold-deep);}
+.dash-strip .dstat.accent b,.dash-strip .dstat.accent span{color:#fff}
+.dash-strip .dstat.accent span{color:rgba(255,255,255,.72)}
+
+.dash-grid{
+  display:grid;grid-template-columns:1.6fr 1fr;grid-template-areas:"trend rm" "type result";
+  gap:20px;margin-bottom:20px;
+}
+.dash-grid .chart-card:nth-child(1){grid-area:trend}
+.dash-grid .chart-card:nth-child(2){grid-area:rm}
+.dash-grid .chart-card:nth-child(3){grid-area:type}
+.dash-grid .chart-card:nth-child(4){grid-area:result}
+.chart-card{margin-bottom:0;display:flex;flex-direction:column}
+.chart-wrap{position:relative;height:240px;padding:14px 16px 16px}
+.chart-wrap-sm{height:200px}
+.chart-empty{
+  position:absolute;inset:0;display:grid;place-items:center;
+  color:var(--ink-3);font-size:13px;
+}
+
+@media (max-width:900px){
+  .dash-grid{grid-template-columns:1fr;grid-template-areas:"trend" "rm" "type" "result"}
+}
+
+/* inline role selector inside the Team table */
+.grid select.role-select{
+  font:inherit;font-size:12.5px;padding:4px 22px 4px 8px;border-radius:6px;
+  border:1px solid var(--rule);background-color:var(--paper-2);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%234A515E' d='M6 8.5 2.5 5h7z'/></svg>");
+  background-repeat:no-repeat;background-position:right 6px center;width:auto;min-width:110px;
+}
+.grid select.role-select:hover{border-color:#C9C3B8}
+.grid select.role-select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-wash)}
+
+/* ---------------- leads repeater ---------------- */
+.leads-list{display:grid;gap:10px;margin-bottom:8px}
+.leads-empty{font-size:13px;color:var(--ink-3);margin:0}
+.lead-row{
+  display:grid;grid-template-columns:1fr 1fr;grid-template-areas:"name phone" "status date" "remove remove";
+  gap:8px;background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:10px;
+}
+.lead-row .lr-name{grid-area:name}
+.lead-row .lr-phone{grid-area:phone}
+.lead-row .lr-status{grid-area:status}
+.lead-row .lr-date{grid-area:date}
+.lead-row .lr-remove{grid-area:remove;justify-self:end}
+.lead-row input,.lead-row select{font-size:13px;padding:8px 9px;width:100%}
+.entry-leads{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.reschedule-note{font-size:11.5px;color:var(--amber);margin-top:2px}
+
+/* ---------------- plan card ---------------- */
+.plan-card .form-inline{align-items:end}
+.plan-card{margin-top:0}
+
+/* ---------------- export range controls ---------------- */
+.range-sep{font-size:12.5px;color:var(--ink-3);align-self:center}
+
+@media (max-width:760px){
+  .lead-row{grid-template-columns:1fr}
+}
+
+/* achievement table sub-labels */
+.grid .th-sub{
+  display:block;font-size:10px;font-weight:500;text-transform:none;
+  letter-spacing:0;color:var(--ink-3);margin-top:2px;
+}
+
+/* readonly plan-total field, visually distinct */
+#p-total{background:var(--paper);color:var(--ink-3);font-family:var(--f-data)}
+
+/* ---------------- per-segment tables (RM & Day-by-day) ---------------- */
+.segment-block{margin-bottom:18px}
+.segment-block:last-child{margin-bottom:0}
+.segment-title{
+  font-family:var(--f-ui);font-size:12px;font-weight:700;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 6px 2px;
+}
+
+/* ---------------- master sub-tabs (Dashboard / Sheets) ---------------- */
+.subtabs{
+  display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--rule);
+  padding-bottom:0;
+}
+.subtab{
+  background:none;border:0;border-bottom:2px solid transparent;font:inherit;
+  font-size:13.5px;font-weight:600;color:var(--ink-3);padding:9px 4px;margin-right:18px;
+  cursor:pointer;transition:color .12s,border-color .12s;
+}
+.subtab:hover{color:var(--ink)}
+.subtab[aria-selected="true"]{color:var(--gold-deep);border-bottom-color:var(--gold-deep)}
+
+/* ---------------- contact lookup (New/Existing WM/CP) ---------------- */
+.lookup-row{display:flex;gap:8px;align-items:center}
+.lookup-row input{flex:1}
+.lookup-prefix{
+  font-family:var(--f-data);font-weight:600;font-size:14px;color:var(--ink-3);
+  background:var(--paper);border:1px solid var(--rule);border-radius:8px;
+  padding:9px 10px;white-space:nowrap;
+}
+.lookup-status{font-size:12.5px;color:var(--ink-3);margin:6px 0 0}
+input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
+
+/* ---------------- follow-ups week navigation ---------------- */
+.week-nav{display:flex;align-items:center;gap:8px}
+.week-nav .btn-link{font-size:15px;padding:2px 8px;font-weight:700}
+
+/* controls sitting under a sub-tab bar, above the first card */
+.sub-controls{margin-bottom:16px}
+
+/* ---------------- bulk import panel ---------------- */
+.import-panel{
+  padding:12px 16px;border-bottom:1px solid var(--rule-soft);background:var(--paper);
+  display:grid;gap:8px;
+}
+.import-panel .lede{font-size:12.5px}
+.import-summary-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--rule-soft)}
+.import-summary-row:last-child{border-bottom:0}
+.import-skip{color:var(--rust)}
+.import-ok{color:var(--green)}
+
+/* ---------------- contact history modal ---------------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(28,20,10,.45);z-index:80;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.modal-panel{
+  background:var(--paper-2);border-radius:14px;max-width:680px;width:100%;
+  max-height:82vh;overflow-y:auto;box-shadow:0 24px 64px -20px rgba(28,20,10,.5);
+}
+.history-thread{padding:8px 20px 20px;display:grid;gap:14px}
+.history-entry{border:1px solid var(--rule);border-radius:10px;padding:12px 14px;background:var(--paper)}
+.history-entry-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.history-entry-date{font-family:var(--f-data);font-size:12.5px;color:var(--ink-3)}
+.history-entry-remarks{font-size:13px;color:var(--ink);margin-top:6px;line-height:1.5}
+
+/* ---------------- Master: collapsible filters panel ---------------- */
+.filters-panel{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  padding:14px 0;margin-bottom:4px;border-bottom:1px solid var(--rule-soft);
+}
+.filters-chip{
+  display:inline-flex;align-items:center;font:600 11px/1 var(--f-data);
+  padding:2px 7px;border-radius:999px;background:var(--gold-wash);color:var(--gold-deep);
+  margin-left:6px;
+}
+.filters-chip:empty{display:none}
+
+/* ---------------- Master: emphasis banner ---------------- */
+.insight-banner{
+  background:var(--deck-navy);border-radius:var(--r);padding:14px 20px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  margin-bottom:16px;flex-wrap:wrap;
+}
+.insight-banner-text{font:500 16px/1.4 var(--f-display);color:#fff}
+.insight-banner-delta{font:600 12px/1 var(--f-data);color:rgba(255,255,255,.75);white-space:nowrap}
+
+/* ---------------- Master: page-wide filter chips ---------------- */
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.chip-toggle{
+  display:inline-flex;align-items:center;gap:7px;font:600 13px/1 var(--f-ui);
+  padding:8px 12px 8px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--rule);background:var(--paper-2);color:var(--ink-2);
+}
+.chip-toggle .chip-count{
+  font:600 11px/1 var(--f-data);padding:3px 8px;border-radius:999px;
+  background:var(--rule-soft);color:var(--ink-3);
+}
+.chip-toggle.active{background:var(--gold-wash);border-color:transparent;color:var(--gold-deep)}
+.chip-toggle.active .chip-count{background:var(--gold-deep);color:#fff}
+
+/* ---------------- Master: light stat grid, replaces the dark funnel bars ---------------- */
+.stat-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:16px}
+.stat-grid .sg-card{
+  background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--r);
+  box-shadow:var(--shadow);padding:16px;
+}
+.stat-grid .sg-num{font:600 22px/1 var(--f-data);color:var(--ink)}
+.stat-grid .sg-label{font:500 12px/1 var(--f-ui);color:var(--ink-3);margin-top:6px}
+@media (max-width:900px){ .stat-grid{grid-template-columns:repeat(3,1fr)} }
+
+/* ---------------- duplicate-first-meeting warning ---------------- */
+.dup-warning{
+  font-size:12.5px;color:var(--amber);background:var(--amber-wash);
+  border:1px solid var(--rule);border-radius:8px;padding:9px 11px;margin:-4px 0 0;
+}
+
+/* ---------------- week agenda (Weekly plan tab) ---------------- */
+.agenda-list{max-height:none}
+.agenda-form{border-top:1px solid var(--rule-soft)}
+.agenda-text{font-weight:500;line-height:1.4}
+.agenda-done{text-decoration:line-through;color:var(--ink-3)}
+.dt-complete{display:grid;gap:10px;margin-top:6px;padding:12px;background:var(--paper);border:1px solid var(--rule-soft);border-radius:8px}
+.dt-next-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
+.dt-next-row input[type="date"]{font-family:var(--f-data);font-size:13px}
+@media (max-width:560px){.dt-next-row{grid-template-columns:1fr}}
+.agenda-banner{
+  font-size:12.5px;color:var(--amber);background:var(--amber-wash);
+  border-bottom:1px solid var(--rule);padding:9px 16px;margin:0;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.agenda-past-note{
+  font-size:12.5px;color:var(--ink-3);padding:12px 16px;margin:0;
+  border-top:1px solid var(--rule-soft);
+}
+
+/* ---------------- meetings scheduled: day-TBC + set date ---------------- */
+.check-field{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer;margin-top:-4px}
+.check-field input{width:16px;height:16px;padding:0;margin:0;accent-color:var(--gold-deep);flex:none}
+.wp-tbc-note{font-size:12.5px;color:var(--ink-3);margin:-6px 0 0}
+.wp-move-note{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wp-setdate{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px}
+.wp-setdate input{width:auto;font-size:13px;padding:6px 9px}
+.wp-setdate input[type="date"]{font-family:var(--f-data)}
+.wp-setdate .form-error{flex-basis:100%;margin:0}
+
+/* ---------------- follow-up status ---------------- */
+.fu-status{display:inline-block;margin-left:6px;font-family:var(--f-ui);font-size:11.5px;font-weight:600;white-space:nowrap}
+div.fu-status{margin-left:0}
+.fu-status-done{color:var(--green)}
+.fu-status-overdue{color:var(--amber)}
+
+
+/* ---------------- weekly plan: "Going with" checklist ---------------- */
+.wp-with-list{display:grid;gap:6px;max-height:200px;overflow-y:auto;padding:10px 12px;border:1px solid var(--rule-soft);border-radius:8px;background:var(--paper)}
+.wp-with-list .check-field{margin-top:0}
+.wp-with-list .check-field em{font-style:normal;color:var(--ink-3);font-size:12px;margin-left:4px}
+
+/* joint meetings: one row, per-person values where they differ */
+.joint-val{line-height:1.35}
+.joint-val + .joint-val{margin-top:4px;padding-top:4px;border-top:1px dashed var(--rule-soft)}
+.joint-who{font-weight:600;color:var(--ink-2)}
+
+/* meeting lists: 5 compact columns + a remarks row that wraps to the visible width */
+#tbl-all td, #tbl-day-all td{vertical-align:top}
+#tbl-all, #tbl-day-all{min-width:0}
+tr.m-main td{border-bottom:none;padding-bottom:4px}
+tr.m-rem td{padding-top:0;padding-bottom:12px;border-bottom:1px solid var(--rule)}
+td.m-who{white-space:normal;min-width:120px}
+td.m-meet{white-space:normal;min-width:140px}
+td.m-outcome{white-space:normal;min-width:150px}
+.m-sub{font-weight:400;font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.4;white-space:normal}
+.m-out{display:block;font-size:12.5px;color:var(--ink-2);margin-top:4px}
+.rem-box{width:0;min-width:100%;white-space:normal;color:var(--ink-2);font-size:13px;line-height:1.45}
+.rem-label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:2px}
+.rem-line + .rem-line{margin-top:4px}
+.rem-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rem-text.rem-open{display:block;-webkit-line-clamp:unset;overflow:visible}
+.rem-more{background:none;border:0;padding:0;margin-top:2px;color:var(--gold-deep);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.m-date{white-space:nowrap}
