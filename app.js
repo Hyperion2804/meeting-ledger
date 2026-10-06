@@ -3469,7 +3469,13 @@ function renderTomorrowTarget(day, rmFilter) {
 // builds the table. Plans are summed per RM, not just kept as the latest
 // one: a single day only ever matches one plan doc anyway, but a month
 // or custom range can match many, and every one of them needs to count.
-function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter) {
+// Achievement compares like with like: a person's meetings count against
+// their plan ONLY on days they actually filed a plan for. Before, every
+// meeting in the range counted against only the days that had a plan, so
+// one small plan plus a month of meetings showed 800%. Meetings on days
+// with no plan are shown separately as "Unplanned", and "Days planned"
+// shows how many working days so far had a plan at all.
+function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter, from, to) {
   // "Channel" = Wealth Manager / Channel Partner. "Customer" = Investor.
   // "New" = First meeting. "Follow-up" = Follow-up meeting. Same four
   // buckets the RM planned against, so Planned and Actual are apples to apples.
@@ -3480,14 +3486,27 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter)
     return stage === "new" ? (chan === "Channel" ? "newChannel" : "newCustomer") : (chan === "Channel" ? "fuChannel" : "fuCustomer");
   };
 
+  const plannedDays = new Map();   // email -> Set of planDate
+  plansInRange.forEach((p) => {
+    if (!plannedDays.has(p.rmEmail)) plannedDays.set(p.rmEmail, new Set());
+    plannedDays.get(p.rmEmail).add(p.planDate);
+  });
   const actualByEmail = new Map();
+  const unplannedByEmail = new Map();
   rowsInRange.forEach((r) => {
     const email = r.rmEmail;
+    if (!(plannedDays.get(email) || new Set()).has(r.date)) {
+      unplannedByEmail.set(email, (unplannedByEmail.get(email) || 0) + 1);
+      return;
+    }
     if (!actualByEmail.has(email)) actualByEmail.set(email, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0, total: 0 });
     const bucket = actualByEmail.get(email);
     bucket[bucketOf(r)]++;
     bucket.total++;
   });
+  // Working days in the range up to today — the days a plan was possible.
+  const lastDay = to < todayISO() ? to : todayISO();
+  const workingDays = from <= lastDay ? eachDateISO(from, lastDay).filter((iso) => officeDay(iso).working).length : 0;
 
   const plannedByEmail = new Map();
   plansInRange.forEach((p) => {
@@ -3499,7 +3518,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter)
   const people = state.team.filter((u) => {
     if (rmFilter && u.email !== rmFilter) return false;      // scoped to whichever RM is selected, if any
     if (u.role === "observer") return false;                 // never goes to meetings
-    if (u.role === "superadmin") return actualByEmail.has(u.email) || plannedByEmail.has(u.email);
+    if (u.role === "superadmin") return actualByEmail.has(u.email) || plannedByEmail.has(u.email) || unplannedByEmail.has(u.email);
     return true;
   });
 
@@ -3515,7 +3534,9 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter)
       ${cell(p.newChannel, a.newChannel)}${cell(p.newCustomer, a.newCustomer)}
       ${cell(p.fuChannel, a.fuChannel)}${cell(p.fuCustomer, a.fuCustomer)}
       <td class="num">${plannedTotal} / ${actualTotal}</td>
-      <td class="num">${pct === null ? "—" : pct + "%"}</td></tr>`;
+      <td class="num">${pct === null ? "—" : pct + "%"}</td>
+      <td class="num">${(plannedDays.get(u.email) || new Set()).size} / ${workingDays}</td>
+      <td class="num">${unplannedByEmail.get(u.email) || 0}</td></tr>`;
   }).join("");
 
   $(tableId).innerHTML = `<thead><tr>
@@ -3525,15 +3546,17 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter)
     <th class="num">Follow-up Channel<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Follow-up Customer<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Total<br><span class="th-sub">Planned / Actual</span></th>
-    <th class="num">Achievement</th>
-    </tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
+    <th class="num">Achievement<br><span class="th-sub">on planned days</span></th>
+    <th class="num">Days planned<br><span class="th-sub">of working days</span></th>
+    <th class="num">Unplanned<br><span class="th-sub">meetings</span></th>
+    </tr></thead><tbody>${body || `<tr><td colspan="9" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
 }
 
 // Day view's single-day Achievement — unchanged in behaviour.
 function renderAchievementInto(tableId, date, rmFilter) {
   const rowsForDate = state.meetings.filter((r) => r.date === date && (!rmFilter || r.rmEmail === rmFilter));
   const plansForDate = state.plans.filter((p) => p.planDate === date && (!rmFilter || p.rmEmail === rmFilter));
-  renderAchievementFromRows(tableId, rowsForDate, plansForDate, rmFilter);
+  renderAchievementFromRows(tableId, rowsForDate, plansForDate, rmFilter, date, date);
 }
 
 // Sheets' Achievement — summed across whichever month or custom range is
@@ -3542,7 +3565,7 @@ function renderAchievementInto(tableId, date, rmFilter) {
 function renderAchievementRangeInto(tableId, from, to, rmFilter) {
   const rowsInRange = state.meetings.filter((r) => r.date >= from && r.date <= to && (!rmFilter || r.rmEmail === rmFilter));
   const plansInRange = state.plans.filter((p) => p.planDate >= from && p.planDate <= to && (!rmFilter || p.rmEmail === rmFilter));
-  renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter);
+  renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter, from, to);
 }
 
 // The Sheets tab's own Achievement card — now summed over the shared
