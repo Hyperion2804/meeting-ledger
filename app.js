@@ -475,10 +475,70 @@ function firmUnique(rows) {
   }
   return [...out.values()];
 }
-const jointTag = (r) => r._joint
-  ? ` <span class="tag tag-flat" title="Also logged by ${esc(r._jointWith.join(", "))}${r._firmPrimary ? " · counted in firm totals" : " · firm totals use the first entry"}">Joint</span>` : "";
 // Leads recorded by two people from the same joint meeting show once.
 const leadBase = (l) => String(l.meetingId || "").split("_").slice(0, 2).join("_");
+// On-screen meeting lists: a joint meeting becomes ONE row. People are
+// joined ("Ankur Rastogi & Chiranjib"); any field they logged differently
+// (result, remarks, follow-up…) shows each person's value, labelled.
+function groupJoint(rows) {
+  const out = new Map();
+  for (const r of rows) {
+    const k = meetKey(r);
+    if (!out.has(k)) out.set(k, []);
+    out.get(k).push(r);
+  }
+  return [...out.values()].map((g) => g.sort((a, b) => (b._firmPrimary ? 1 : 0) - (a._firmPrimary ? 1 : 0) || loggedAt(a) - loggedAt(b)));
+}
+const firstName = (r) => String(r.rmName || r.rmEmail || "").split(" ")[0];
+function jointCell(g, html) {
+  const vals = g.map(html);
+  if (vals.every((v) => v === vals[0])) return vals[0];
+  return vals.map((v, i) => `<div class="joint-val"><span class="joint-who">${esc(firstName(g[i]))}:</span> ${v || "—"}</div>`).join("");
+}
+// Each meeting is two table rows: its details, then a full-width remarks
+// line (so remarks never need sideways scrolling). Phone, email and address
+// sit under the client's name instead of in three columns. Long remarks are
+// cut to two lines with "Show more" (wired by wireRemarks after render).
+const MEETING_COLS = (withDate) => withDate ? 10 : 9;
+const meetingHead = (withDate) => `<thead><tr>
+    ${withDate ? "<th>Date</th>" : ""}<th>RM</th><th>Name &amp; contact</th><th>Type</th><th>Meeting</th><th>Mode</th>
+    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th></tr></thead>`;
+function meetingRowsHtml(groups, fuIdx, withDate) {
+  return groups.map((g) => {
+    const r = g[0];
+    const who = g.map((x) => x.rmName || x.rmEmail).join(" & ");
+    const contact = (x) => [x.phone, x.email, x.address].filter(Boolean).map(esc).join(" · ");
+    const remarks = g.map((x) => (x.remarks || "").trim());
+    const same = remarks.every((t) => t === remarks[0]);
+    const remLines = (same ? [[null, remarks[0]]] : g.map((x, i) => [firstName(x), remarks[i]]))
+      .map(([w, t]) => `<div class="rem-line"><div class="rem-text">${w ? `<span class="joint-who">${esc(w)}:</span> ` : ""}${t ? esc(t) : "—"}</div><button type="button" class="rem-more" hidden>Show more</button></div>`).join("");
+    return `<tr class="m-main">
+        ${withDate ? `<td class="num">${esc(fmtDMY(r.date))}</td>` : ""}<td>${esc(who)}${g.length > 1 ? ` <span class="tag tag-flat" title="Joint meeting: counted once in firm totals, and for each person in their own numbers">Joint</span>` : ""}</td>
+        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>
+          <div class="m-contact">${jointCell(g, contact)}</div></td>
+        <td>${jointCell(g, (x) => esc(x.personType))}</td>
+        <td>${jointCell(g, (x) => esc(x.meetingType))}</td><td>${jointCell(g, (x) => esc(x.mode))}</td>
+        <td>${jointCell(g, (x) => esc(sourceDetail(x)))}</td>
+        <td>${jointCell(g, (x) => resultTag(x.result))}</td><td>${jointCell(g, (x) => esc(x.shared || "—"))}</td>
+        <td class="num">${jointCell(g, (x) => followUpCell(x, fuIdx))}</td></tr>
+      <tr class="m-rem">${withDate ? "<td></td>" : ""}<td colspan="${MEETING_COLS(withDate) - (withDate ? 1 : 0)}"><div class="rem-box"><span class="rem-label">Remarks</span>${remLines}</div></td></tr>`;
+  }).join("");
+}
+// Shows "Show more" only on remarks actually cut off at two lines.
+function wireRemarks(table) {
+  table.querySelectorAll(".rem-line").forEach((line) => {
+    const text = line.querySelector(".rem-text"), btn = line.querySelector(".rem-more");
+    // A table rendered while its tab is hidden can't be measured; fall back
+    // to length (about two lines' worth at laptop width).
+    const cut = text.clientHeight ? text.scrollHeight > text.clientHeight + 1 : text.textContent.length > 170;
+    if (cut) btn.hidden = false;
+    btn.addEventListener("click", () => {
+      const open = text.classList.toggle("rem-open");
+      btn.textContent = open ? "Show less" : "Show more";
+    });
+  });
+}
+
 function uniqueLeads(rows) {
   const seen = new Set();
   return [...rows].sort((a, b) => loggedAt(a) - loggedAt(b)).filter((l) => {
@@ -3135,25 +3195,15 @@ function renderMaster() {
 
   /* --- every meeting (respects the active chips) --- */
   // Every entry, joint meetings included (each person's own remarks).
-  $("all-count").textContent = `${filteredP.length} row${filteredP.length === 1 ? "" : "s"}`;
   const sorted = [...filteredP].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const groups = groupJoint(sorted);
+  $("all-count").textContent = `${groups.length} meeting${groups.length === 1 ? "" : "s"}`;
   const fuIdx = followUpIndex();
-  $("tbl-all").innerHTML = `<thead><tr>
-    <th>Date</th><th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
-    <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
-    </tr></thead><tbody>${
-      sorted.length ? sorted.map((r) => `<tr>
-        <td class="num">${esc(fmtDMY(r.date))}</td><td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>${jointTag(r)}</td><td>${esc(r.personType)}</td>
-        <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
-        <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
-        <td>${esc(sourceDetail(r))}</td>
-        <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${followUpCell(r, fuIdx)}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
-        : `<tr><td colspan="14" class="empty">No meetings this month.</td></tr>`
+  $("tbl-all").innerHTML = `${meetingHead(true)}<tbody>${
+      groups.length ? meetingRowsHtml(groups, fuIdx, true)
+        : `<tr><td colspan="${MEETING_COLS(true)}" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-all"));
   $("tbl-all").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
 
@@ -3235,24 +3285,14 @@ function renderDayView() {
   const dayTypeFilter = $("day-type-filter").value;
   const dayAllRows = dayTypeFilter === "all" ? onDayP : onDayP.filter((r) => r.personType === dayTypeFilter);
   const sorted = [...dayAllRows].sort((a, b) => (a.rmName || "").localeCompare(b.rmName || ""));
-  $("day-all-count").textContent = `${sorted.length} row${sorted.length === 1 ? "" : "s"}`;
+  const groups = groupJoint(sorted);
+  $("day-all-count").textContent = `${groups.length} meeting${groups.length === 1 ? "" : "s"}`;
   const fuIdx = followUpIndex();
-  $("tbl-day-all").innerHTML = `<thead><tr>
-    <th>RM</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
-    <th>Phone</th><th>Email</th><th>Address</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th><th>Remarks</th>
-    </tr></thead><tbody>${
-      sorted.length ? sorted.map((r) => `<tr>
-        <td>${esc(r.rmName || r.rmEmail)}</td>
-        <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>${jointTag(r)}</td><td>${esc(r.personType)}</td>
-        <td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
-        <td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="wrap">${esc(r.address)}</td>
-        <td>${esc(sourceDetail(r))}</td>
-        <td>${resultTag(r.result)}</td><td>${esc(r.shared || "—")}</td>
-        <td class="num">${followUpCell(r, fuIdx)}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td></tr>`).join("")
-        : `<tr><td colspan="13" class="empty">No meetings on this day.</td></tr>`
+  $("tbl-day-all").innerHTML = `${meetingHead(false)}<tbody>${
+      groups.length ? meetingRowsHtml(groups, fuIdx, false)
+        : `<tr><td colspan="${MEETING_COLS(false)}" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-day-all"));
   $("tbl-day-all").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
 }
