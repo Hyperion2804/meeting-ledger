@@ -493,9 +493,14 @@ see.
 
 **Tomorrow's plan, and how it's checked.** Everyone — RM, Admin, or Super
 Admin — can log how many meetings they plan to do tomorrow, from the small
-card under the meeting form. On Master, **Plan vs achievement** shows planned
-vs. actual meetings for whichever date you pick, per person, with an
-achievement percentage.
+card under the meeting form. On Master, **Plan vs achievement** compares
+like with like: a person's meetings count against their plan **only on
+days they filed a plan for**. Achievement % = meetings on planned days ÷
+meetings planned. Two more columns keep it honest: **Days planned**
+(e.g. 3 / 22 working days so far in the range) and **Unplanned meetings**
+(meetings on days with no plan, shown but not counted toward %). Before,
+every meeting in the month was compared against only the days that had a
+plan, so one small plan plus a month of meetings could show 800%.
 
 **Date range, month or custom.** By default Master shows the selected month —
 funnel, dashboard, achievement, both segment-table sections, every meeting,
