@@ -458,6 +458,12 @@ only date + phone, and an Admin's save could silently overwrite a
 colleague's meeting for the same client and day. That can't happen any
 more: nobody, Admins included, can change whose meeting it is.)
 
+**Meeting lists fit the screen.** In Every meeting and the Day view,
+phone, email and address sit in small text under the client's name, and
+remarks get their own full-width line under each meeting, so there's no
+sideways scrolling. Long remarks show two lines with **Show more**; the
+full text is always in the client's history and the Excel download.
+
 **How a joint meeting is counted.** When two or more people log the same
 client (same phone) on the same day, each entry is marked **Joint**. Each
 person's entry counts in *their own* numbers (per-person tables, Plan vs
@@ -465,9 +471,14 @@ Achievement, their own month). **Firm-wide totals count it once**, using
 the first entry logged: the stat grid, dashboard and charts, the funnel,
 the day-by-day tables, the "All RMs" total rows, and the `Master` tab of
 the Excel download. So per-person totals can add up to more than the firm
-total; Master says so when it happens. Every entry, with its own remarks,
-still appears in Every meeting and in the `All Meetings` tab (with a
-"Joint meeting" column). A lead recorded by both people from the same
+total; Master says so when it happens. On screen (Every meeting, and the
+Day view's meeting list) a joint meeting is **one row**: the people are
+joined ("Ankur Rastogi & Chiranjib Das", first logger first) with a
+**Joint** tag, and any field they logged differently, remarks, result,
+follow-up and so on, shows each person's value labelled with their
+name. The `All Meetings` tab in Excel keeps one row per person (with a
+"Joint meeting" column), since each has their own designation and
+employee ID. A lead recorded by both people from the same
 joint meeting shows once on Master and in Download leads.
 
 **Meeting dates can't be in the future.** The date picker won't let you go
