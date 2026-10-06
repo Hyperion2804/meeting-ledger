@@ -495,33 +495,41 @@ function jointCell(g, html) {
   if (vals.every((v) => v === vals[0])) return vals[0];
   return vals.map((v, i) => `<div class="joint-val"><span class="joint-who">${esc(firstName(g[i]))}:</span> ${v || "—"}</div>`).join("");
 }
-// Each meeting is two table rows: its details, then a full-width remarks
-// line (so remarks never need sideways scrolling). Phone, email and address
-// sit under the client's name instead of in three columns. Long remarks are
-// cut to two lines with "Show more" (wired by wireRemarks after render).
-const MEETING_COLS = (withDate) => withDate ? 10 : 9;
+// Each meeting is two table rows: five compact columns, then a remarks
+// line underneath that wraps to the visible width — nothing needs sideways
+// scrolling, even in a narrow window. Related details share a cell:
+// Client = name + phone/email/city, Meeting = type · stage · mode + source,
+// Outcome = result + lead/docs + follow-up. On a joint meeting any part the
+// people logged differently shows each person's value, labelled.
+const MEETING_COLS = (withDate) => withDate ? 5 : 4;
 const meetingHead = (withDate) => `<thead><tr>
-    ${withDate ? "<th>Date</th>" : ""}<th>RM</th><th>Name &amp; contact</th><th>Type</th><th>Meeting</th><th>Mode</th>
-    <th>Source</th><th>Result</th><th>Lead / docs</th><th>Follow-up</th></tr></thead>`;
+    ${withDate ? "<th>Date</th>" : ""}<th>RM</th><th>Client</th><th>Meeting</th><th>Outcome</th></tr></thead>`;
 function meetingRowsHtml(groups, fuIdx, withDate) {
   return groups.map((g) => {
     const r = g[0];
     const who = g.map((x) => x.rmName || x.rmEmail).join(" & ");
     const contact = (x) => [x.phone, x.email, x.address].filter(Boolean).map(esc).join(" · ");
+    const meetLine = (x) => [x.personType, x.meetingType, x.mode].filter(Boolean).map(esc).join(" · ");
+    const srcLine = (x) => sourceDetail(x) ? `Source: ${esc(sourceDetail(x))}` : "";
+    const outcome = (x) => {
+      const docs = x.personType === "Investor" ? "Docs" : "Lead";
+      const parts = [resultTag(x.result)];
+      if (x.shared) parts.push(`<span class="m-out">${docs}: ${esc(x.shared)}</span>`);
+      if (x.followUpDate) parts.push(`<span class="m-out">Follow-up <span class="m-date">${followUpCell(x, fuIdx)}</span></span>`);
+      return parts.join("");
+    };
     const remarks = g.map((x) => (x.remarks || "").trim());
     const same = remarks.every((t) => t === remarks[0]);
     const remLines = (same ? [[null, remarks[0]]] : g.map((x, i) => [firstName(x), remarks[i]]))
       .map(([w, t]) => `<div class="rem-line"><div class="rem-text">${w ? `<span class="joint-who">${esc(w)}:</span> ` : ""}${t ? esc(t) : "—"}</div><button type="button" class="rem-more" hidden>Show more</button></div>`).join("");
     return `<tr class="m-main">
-        ${withDate ? `<td class="num">${esc(fmtDMY(r.date))}</td>` : ""}<td>${esc(who)}${g.length > 1 ? ` <span class="tag tag-flat" title="Joint meeting: counted once in firm totals, and for each person in their own numbers">Joint</span>` : ""}</td>
+        ${withDate ? `<td class="num">${esc(fmtDMY(r.date))}</td>` : ""}
+        <td class="m-who">${esc(who)}${g.length > 1 ? ` <span class="tag tag-flat" title="Joint meeting: counted once in firm totals, and for each person in their own numbers">Joint</span>` : ""}</td>
         <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>
-          <div class="m-contact">${jointCell(g, contact)}</div></td>
-        <td>${jointCell(g, (x) => esc(x.personType))}</td>
-        <td>${jointCell(g, (x) => esc(x.meetingType))}</td><td>${jointCell(g, (x) => esc(x.mode))}</td>
-        <td>${jointCell(g, (x) => esc(sourceDetail(x)))}</td>
-        <td>${jointCell(g, (x) => resultTag(x.result))}</td><td>${jointCell(g, (x) => esc(x.shared || "—"))}</td>
-        <td class="num">${jointCell(g, (x) => followUpCell(x, fuIdx))}</td></tr>
-      <tr class="m-rem">${withDate ? "<td></td>" : ""}<td colspan="${MEETING_COLS(withDate) - (withDate ? 1 : 0)}"><div class="rem-box"><span class="rem-label">Remarks</span>${remLines}</div></td></tr>`;
+          <div class="m-sub">${jointCell(g, contact)}</div></td>
+        <td class="m-meet">${jointCell(g, meetLine)}<div class="m-sub">${jointCell(g, srcLine)}</div></td>
+        <td class="m-outcome">${jointCell(g, outcome)}</td></tr>
+      <tr class="m-rem">${withDate ? "<td></td>" : ""}<td colspan="${withDate ? 4 : 4}"><div class="rem-box"><span class="rem-label">Remarks</span>${remLines}</div></td></tr>`;
   }).join("");
 }
 // Shows "Show more" only on remarks actually cut off at two lines.
