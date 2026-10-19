@@ -467,6 +467,18 @@ scrolling even in a narrow window. Long remarks show two lines with
 **Show more**; the full text is always in the client's history and the
 Excel download.
 
+**Design pass (October 2026).** Tables fit a 1024px laptop without
+sideways scrolling (column headers wrap; Team shows email under the name).
+Dark mode re-picks every accent used as text, so selected tabs, chips and
+links stay readable. Missing required fields are outlined in red with
+"Required" under them and the first one is focused. One name per metric
+everywhere: Reachouts · Interested · Lead / docs shared · Meeting done /
+logged in. The address bar remembers where you are (e.g. `#master/sheets`),
+so refresh keeps your place and links can point straight at a view.
+Removing a planned meeting or planner item offers **Undo** instead of a
+pop-up; signing out no longer asks. Client history closes with **Esc**.
+Toasts are announced to screen readers and leave the way they arrived.
+
 **How a joint meeting is counted.** When two or more people log the same
 client (same phone) on the same day, each entry is marked **Joint**. Each
 person's entry counts in *their own* numbers (per-person tables, Plan vs
