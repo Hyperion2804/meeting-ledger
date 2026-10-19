@@ -567,7 +567,7 @@
         <span class="insight-banner-delta" id="insight-banner-delta"></span>
       </div>
 
-      <div id="master-stat-grid" class="stat-grid"></div>
+      <div id="master-stat-grid" class="dash-strip"></div>
 
       <section class="card">
         <div class="card-head">
@@ -846,12 +846,12 @@
   </main>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<div id="history-modal" class="modal-overlay" hidden>
+<div id="history-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="history-modal-title" hidden>
   <div class="modal-panel">
     <div class="card-head">
-      <h2>Contact history — <span id="history-modal-name"></span></h2>
+      <h2 id="history-modal-title">Contact history — <span id="history-modal-name"></span></h2>
       <button type="button" id="btn-history-close" class="btn-link">Close</button>
     </div>
     <div id="history-modal-body" class="history-thread"></div>
