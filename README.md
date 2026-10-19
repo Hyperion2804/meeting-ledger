@@ -479,6 +479,15 @@ Removing a planned meeting or planner item offers **Undo** instead of a
 pop-up; signing out no longer asks. Client history closes with **Esc**.
 Toasts are announced to screen readers and leave the way they arrived.
 
+**Every table fits a laptop (1024px and up).** My history now uses the
+same layout as Master's Every meeting (Client · Meeting · Outcome, remarks
+underneath, Edit on the right). Master → Weekly plan, Master → Travel
+plans and Approvals group related details (e.g. Trip = destination +
+dates) and put Purpose / Remarks on their own line with **Show more**, so
+Approve / Reject and Delete are always on screen. Contacts shows the ID
+under the name and email under the phone. Column headers take their
+column's alignment automatically.
+
 **How a joint meeting is counted.** When two or more people log the same
 client (same phone) on the same day, each entry is marked **Joint**. Each
 person's entry counts in *their own* numbers (per-person tables, Plan vs
