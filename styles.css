@@ -28,6 +28,11 @@
   --gold:#B8862F;        /* brighter — decorative only (chart fills, borders, focus rings), never behind white text */
   --gold-2:#D4A94F;
   --gold-wash:#F4E9D1;
+  /* accent used as TEXT (links, selected sub-tab, chips). --gold-deep stays
+     the button fill in both themes; this one is re-picked for dark mode. */
+  --accent-text:#7A4A12;
+  --zero:#968A78;          /* quiet but readable zeros in tables */
+  --chevron:#6B5A44;
 
   /* status — semantic only, deliberately NOT brand colors */
   --green:#1B4D3E;
@@ -77,6 +82,9 @@
   --gold:#D4A94F;          /* brightened — the light-mode value reads too muted on a dark surface */
   --gold-2:#E3BD70;
   --gold-wash:#3A2C15;
+  --accent-text:#E3BD70;
+  --zero:#7D705C;
+  --chevron:#A89878;
 
   --green:#5FB39A;
   --green-wash:#16332A;
@@ -167,7 +175,7 @@ em{font-style:normal;color:var(--ink-3);font-weight:400}
   padding:7px 12px;border-radius:7px;cursor:pointer;
 }
 .tab:hover{color:#fff;background:rgba(255,255,255,.08)}
-.tab[aria-selected="true"]{color:var(--ink);background:var(--paper)}
+.tab[aria-selected="true"]{color:#1C140A;background:#FBF8F2}
 .who{display:flex;align-items:center;gap:10px}
 .who-name{font-size:13px;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
 .theme-toggle{
@@ -226,8 +234,8 @@ input:hover,select:hover,textarea:hover{border-color:#C9C3B8}
 input:focus,select:focus,textarea:focus{
   outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-wash);
 }
-select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%234A515E' d='M6 8.5 2.5 5h7z'/></svg>");
-  background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%23887A66' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.75 6 7.75l3-3'/></svg>");
+  background-repeat:no-repeat;background-position:right 11px center;background-size:11px 11px;padding-right:30px}
 .month-input{width:auto;font-family:var(--f-data);font-size:13px;padding:7px 10px}
 .form-actions{display:flex;gap:8px;margin-top:2px}
 .form-error{
@@ -251,7 +259,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .topbar .btn-ghost:hover{background:rgba(255,255,255,.1);color:#fff}
 .btn-sm{font-size:13px;padding:7px 12px}
 .btn-lg{font-size:15px;padding:12px 20px}
-.btn-link{background:none;border:0;font:inherit;font-size:12.5px;font-weight:600;color:var(--gold-deep);cursor:pointer;padding:2px 4px;border-radius:5px}
+.btn-link{background:none;border:0;font:inherit;font-size:12.5px;font-weight:600;color:var(--accent-text);cursor:pointer;padding:2px 4px;border-radius:5px}
 .btn-link:hover{background:var(--gold-wash)}
 .btn-link.danger{color:var(--rust)}
 .btn-link.danger:hover{background:var(--rust-wash)}
@@ -285,6 +293,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .grid{border-collapse:collapse;width:100%;font-size:13.5px}
 .grid th,.grid td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--rule-soft);white-space:nowrap}
 .grid thead th{
+  white-space:normal;vertical-align:bottom;line-height:1.25;
   font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
   background:var(--paper);position:sticky;top:0;z-index:1;border-bottom:1px solid var(--rule);
 }
@@ -292,7 +301,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .grid td.num,.grid th.num{text-align:right;font-family:var(--f-data);font-variant-numeric:tabular-nums}
 .grid td.name{font-weight:600;white-space:normal;min-width:150px}
 .name-link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);cursor:pointer;text-align:left}
-.name-link:hover{color:var(--gold-deep);text-decoration:underline}
+.name-link:hover{color:var(--accent-text);text-decoration:underline}
 .grid td.wrap{white-space:normal;min-width:220px;color:var(--ink-3);font-size:13px}
 .grid tfoot td{font-weight:700;background:var(--paper);border-top:1px solid var(--rule);border-bottom:0}
 .grid-dense th,.grid-dense td{padding:7px 9px;font-size:12.5px}
@@ -300,7 +309,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   text-transform:none;letter-spacing:.02em;font-size:11px;color:var(--ink);
   background:var(--rule-soft);text-align:center;border-bottom:1px solid var(--rule);
 }
-.zero{color:#C4BEB3}
+.zero{color:var(--zero)}
 
 .tag{
   display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:5px;
@@ -323,7 +332,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .fu-item:last-child{border-bottom:0}
 .fu-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .fu-name{font-weight:600;font-size:13.5px}
-.fu-date{font-family:var(--f-data);font-size:12px;color:var(--gold-deep);font-weight:600}
+.fu-date{font-family:var(--f-data);font-size:12px;color:var(--accent-text);font-weight:600}
 .fu-meta{font-size:12px;color:var(--ink-3)}
 .day-head{
   position:sticky;top:0;background:var(--paper);z-index:1;
@@ -364,9 +373,15 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   .signin{grid-template-columns:1fr}
   .signin-aside{order:-1;padding:28px 22px}
   .signin-panel{padding:28px 22px 44px}
-  .topbar{flex-wrap:wrap;gap:10px}
-  .tabs{order:3;width:100%;margin-right:0}
-  .who-name{display:none}
+  .topbar{flex-wrap:wrap;gap:8px 10px;padding-top:8px;padding-bottom:8px}
+  .tabs{order:3;width:100%;margin-right:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{white-space:nowrap;flex:none}
+  .who{margin-left:auto}
+  .who-name,.who .chip{display:none}
+  .subtabs{overflow-x:auto;scrollbar-width:none}
+  .subtabs::-webkit-scrollbar{display:none}
+  .subtab{white-space:nowrap;flex:none;margin-right:12px}
   .row-2{grid-template-columns:1fr}
   .f-band .f-pct{display:none}
 }
@@ -431,8 +446,8 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .grid select.role-select{
   font:inherit;font-size:12.5px;padding:4px 22px 4px 8px;border-radius:6px;
   border:1px solid var(--rule);background-color:var(--paper-2);
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%234A515E' d='M6 8.5 2.5 5h7z'/></svg>");
-  background-repeat:no-repeat;background-position:right 6px center;width:auto;min-width:110px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%23887A66' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.75 6 7.75l3-3'/></svg>");
+  background-repeat:no-repeat;background-position:right 7px center;background-size:10px 10px;width:auto;min-width:110px;
 }
 .grid select.role-select:hover{border-color:#C9C3B8}
 .grid select.role-select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-wash)}
@@ -456,6 +471,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 /* ---------------- plan card ---------------- */
 .plan-card .form-inline{align-items:end}
 .plan-card{margin-top:0}
+.plan-card > .card-note{padding:0 16px 14px}
 
 /* ---------------- export range controls ---------------- */
 .range-sep{font-size:12.5px;color:var(--ink-3);align-self:center}
@@ -478,7 +494,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
 .segment-block:last-child{margin-bottom:0}
 .segment-title{
   font-family:var(--f-ui);font-size:12px;font-weight:700;letter-spacing:.03em;
-  text-transform:uppercase;color:var(--ink-3);margin:0 0 6px 2px;
+  text-transform:uppercase;color:var(--ink-3);margin:0;padding:14px 16px 6px;
 }
 
 /* ---------------- master sub-tabs (Dashboard / Sheets) ---------------- */
@@ -492,7 +508,7 @@ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns=
   cursor:pointer;transition:color .12s,border-color .12s;
 }
 .subtab:hover{color:var(--ink)}
-.subtab[aria-selected="true"]{color:var(--gold-deep);border-bottom-color:var(--gold-deep)}
+.subtab[aria-selected="true"]{color:var(--accent-text);border-bottom-color:var(--accent-text)}
 
 /* ---------------- contact lookup (New/Existing WM/CP) ---------------- */
 .lookup-row{display:flex;gap:8px;align-items:center}
@@ -545,7 +561,7 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
 }
 .filters-chip{
   display:inline-flex;align-items:center;font:600 11px/1 var(--f-data);
-  padding:2px 7px;border-radius:999px;background:var(--gold-wash);color:var(--gold-deep);
+  padding:2px 7px;border-radius:999px;background:var(--gold-wash);color:var(--accent-text);
   margin-left:6px;
 }
 .filters-chip:empty{display:none}
@@ -570,7 +586,7 @@ input[readonly]{background:var(--paper);color:var(--ink-3);cursor:not-allowed}
   font:600 11px/1 var(--f-data);padding:3px 8px;border-radius:999px;
   background:var(--rule-soft);color:var(--ink-3);
 }
-.chip-toggle.active{background:var(--gold-wash);border-color:transparent;color:var(--gold-deep)}
+.chip-toggle.active{background:var(--gold-wash);border-color:transparent;color:var(--accent-text)}
 .chip-toggle.active .chip-count{background:var(--gold-deep);color:#fff}
 
 /* ---------------- Master: light stat grid, replaces the dark funnel bars ---------------- */
@@ -650,5 +666,37 @@ td.m-outcome{white-space:normal;min-width:150px}
 .rem-line + .rem-line{margin-top:4px}
 .rem-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .rem-text.rem-open{display:block;-webkit-line-clamp:unset;overflow:visible}
-.rem-more{background:none;border:0;padding:0;margin-top:2px;color:var(--gold-deep);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.rem-more{background:none;border:0;padding:0;margin-top:2px;color:var(--accent-text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
 .m-date{white-space:nowrap}
+
+/* ---------------- press feedback: instant, on press (not just hover) ---------------- */
+.tab,.subtab,.chip-toggle,.btn-link,.name-link,.rem-more,.theme-toggle{transition:transform .08s ease-out,color .12s,background .12s,border-color .12s}
+.tab:active,.subtab:active,.chip-toggle:active,.btn-link:active,.rem-more:active,.theme-toggle:active{transform:scale(.96)}
+.name-link:active{opacity:.7}
+
+/* ---------------- inline validation ---------------- */
+input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"]{
+  border-color:var(--rust);box-shadow:0 0 0 3px var(--rust-wash);
+}
+.field > .field-msg,.field-msg{font-size:12px;font-weight:600;color:var(--rust);margin-top:-1px}
+
+/* ---------------- toast: enters and leaves the same way ---------------- */
+.toast{display:flex;align-items:center;gap:14px}
+.toast.leaving{animation:sink .18s ease-in forwards}
+@keyframes sink{to{opacity:0;transform:translate(-50%,8px)}}
+.toast-action{background:none;border:0;padding:2px 4px;font:inherit;font-weight:700;color:#E3BD70;cursor:pointer;border-radius:5px}
+.toast-action:hover{background:rgba(255,255,255,.1)}
+
+/* ---------------- client history modal: fade + rise, Esc to close ---------------- */
+.modal-overlay{animation:fadein .16s ease-out}
+.modal-panel{animation:panelin .2s cubic-bezier(.2,.7,.2,1)}
+@keyframes fadein{from{opacity:0}}
+@keyframes panelin{from{opacity:0;transform:translateY(8px) scale(.985)}}
+
+/* Sheets stat tiles now reuse the dashboard strip — one design for the same numbers */
+#master-stat-grid.dash-strip{margin-bottom:16px}
+
+/* team table: compact inline editors so it fits a laptop */
+#tbl-team .team-edit{width:100%;min-width:0;max-width:180px;padding:6px 8px;font-size:13px}
+#tbl-team .manager-select,#tbl-team .role-select{font-size:12.5px;padding:5px 26px 5px 8px;max-width:190px}
+#tbl-team td{vertical-align:middle}
