@@ -548,10 +548,14 @@ function jointCell(g, html) {
 // Client = name + phone/email/city, Meeting = type · stage · mode + source,
 // Outcome = result + lead/docs + follow-up. On a joint meeting any part the
 // people logged differently shows each person's value, labelled.
-const MEETING_COLS = (withDate) => withDate ? 5 : 4;
-const meetingHead = (withDate) => `<thead><tr>
-    ${withDate ? "<th>Date</th>" : ""}<th>RM</th><th>Client</th><th>Meeting</th><th>Outcome</th></tr></thead>`;
-function meetingRowsHtml(groups, fuIdx, withDate) {
+// opts: { date: show Date column, rm: show RM column, action: fn(row) → html for a last column }
+const mOpts = (o) => (typeof o === "object" ? { date: true, rm: true, action: null, ...o } : { date: !!o, rm: true, action: null });
+const MEETING_COLS = (o) => { o = mOpts(o); return 3 + (o.date ? 1 : 0) + (o.rm ? 1 : 0) + (o.action ? 1 : 0); };
+const meetingHead = (o) => { o = mOpts(o); return `<thead><tr>
+    ${o.date ? '<th class="num">Date</th>' : ""}${o.rm ? "<th>RM</th>" : ""}<th>Client</th><th>Meeting</th><th>Outcome</th>${o.action ? "<th></th>" : ""}</tr></thead>`; };
+function meetingRowsHtml(groups, fuIdx, o) {
+  o = mOpts(o);
+  const withDate = o.date;
   return groups.map((g) => {
     const r = g[0];
     const who = g.map((x) => x.rmName || x.rmEmail).join(" & ");
@@ -571,14 +575,24 @@ function meetingRowsHtml(groups, fuIdx, withDate) {
       .map(([w, t]) => `<div class="rem-line"><div class="rem-text">${w ? `<span class="joint-who">${esc(w)}:</span> ` : ""}${t ? esc(t) : "—"}</div><button type="button" class="rem-more" hidden>Show more</button></div>`).join("");
     return `<tr class="m-main">
         ${withDate ? `<td class="num">${esc(fmtDMY(r.date))}</td>` : ""}
-        <td class="m-who">${esc(who)}${g.length > 1 ? ` <span class="tag tag-flat" title="Joint meeting: counted once in firm totals, and for each person in their own numbers">Joint</span>` : ""}</td>
+        ${o.rm ? `<td class="m-who">${esc(who)}${g.length > 1 ? ` <span class="tag tag-flat" title="Joint meeting: counted once in firm totals, and for each person in their own numbers">Joint</span>` : ""}</td>` : ""}
         <td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button>
           <div class="m-sub">${jointCell(g, contact)}</div></td>
         <td class="m-meet">${jointCell(g, meetLine)}<div class="m-sub">${jointCell(g, srcLine)}</div></td>
-        <td class="m-outcome">${jointCell(g, outcome)}</td></tr>
-      <tr class="m-rem">${withDate ? "<td></td>" : ""}<td colspan="${withDate ? 4 : 4}"><div class="rem-box"><span class="rem-label">Remarks</span>${remLines}</div></td></tr>`;
+        <td class="m-outcome">${jointCell(g, outcome)}</td>${o.action ? `<td class="m-act">${o.action(r)}</td>` : ""}</tr>
+      <tr class="m-rem">${withDate ? "<td></td>" : ""}<td colspan="${MEETING_COLS(o) - (withDate ? 1 : 0)}"><div class="rem-box"><span class="rem-label">Remarks</span>${remLines}</div></td></tr>`;
   }).join("");
 }
+// A free-text line under a table row (Purpose, Remarks…), wrapped to the
+// visible width and cut to two lines with "Show more" by wireRemarks().
+function notesRowHtml(colspan, label, text, blankFirst = false) {
+  if (!text) return "";
+  return `<tr class="m-rem">${blankFirst ? "<td></td>" : ""}<td colspan="${colspan}"><div class="rem-box"><span class="rem-label">${esc(label)}</span><div class="rem-line"><div class="rem-text">${esc(text)}</div><button type="button" class="rem-more" hidden>Show more</button></div></div></td></tr>`;
+}
+const shortDay = (iso) => iso ? localDate(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+const tripWhen = (p) => p.toDate && p.toDate !== p.fromDate ? `${shortDay(p.fromDate)} – ${shortDay(p.toDate)} ${String(p.toDate).slice(0, 4)}` : `${shortDay(p.fromDate)} ${String(p.fromDate || "").slice(0, 4)}`;
+const tripCounts = (p) => `${p.meetingsPlanned ?? 0} meeting${p.meetingsPlanned === 1 ? "" : "s"}${p.eventsPlanned ? ` · ${p.eventsPlanned} event${p.eventsPlanned === 1 ? "" : "s"}` : ""}`;
+
 // Shows "Show more" only on remarks actually cut off at two lines.
 function wireRemarks(table) {
   table.querySelectorAll(".rem-line").forEach((line) => {
@@ -2038,18 +2052,21 @@ function renderMasterWeeklyPlan() {
   $("master-weeklyplan-label").textContent = label;
   $("master-weeklyplan-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
 
+  // When | RM (+ who's going along) | Client (+ phone · location) | Type | Status,
+  // with Purpose on its own line underneath — fits a laptop, no sideways scroll.
   $("tbl-master-weeklyplan").innerHTML = `<thead><tr>
-    <th>Date</th><th>RM</th><th>Going with</th><th>Name</th><th>Type</th><th>Phone</th><th>Location</th><th>Purpose</th><th>Status</th>
+    <th>When</th><th>RM</th><th>Client</th><th>Type</th><th>Status</th>
     </tr></thead><tbody>${
-      rows.length ? rows.map((p) => `<tr>
-        <td class="num">${esc(planWhen(p))}</td><td>${esc(p.rmName || p.rmEmail)}</td>
-        <td class="wrap">${esc(withNames(p) || "Alone")}</td>
-        <td class="name">${esc(p.name)}</td><td>${esc(p.personType)}</td>
-        <td>${esc(p.phone || "—")}</td><td class="wrap">${esc(p.location || "—")}</td>
-        <td class="wrap">${esc(p.purpose || "")}</td>
-        <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>`).join("")
-        : `<tr><td colspan="9" class="empty">No meetings scheduled this month.</td></tr>`
+      rows.length ? rows.map((p) => `<tr class="m-main">
+        <td class="m-when">${esc(planWhen(p))}</td>
+        <td class="m-who">${esc(p.rmName || p.rmEmail)}${withNames(p) ? `<div class="m-sub">with ${esc(withNames(p))}</div>` : ""}</td>
+        <td class="name">${esc(p.name)}<div class="m-sub">${[p.phone, p.location].filter(Boolean).map(esc).join(" · ") || "—"}</div></td>
+        <td>${esc(p.personType)}</td>
+        <td><span class="tag ${p.status === WP_STATUS.DONE ? "tag-green" : "tag-amber"}">${esc(p.status)}</span></td></tr>
+        ${notesRowHtml(4, "Purpose", p.purpose, true) || '<tr class="m-rem m-rem-empty"><td colspan="5"></td></tr>'}`).join("")
+        : `<tr><td colspan="5" class="empty">No meetings scheduled this month.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-master-weeklyplan"));
   renderMasterAgenda();
 }
 $("master-weeklyplan-month").value = thisMonth();
@@ -2470,16 +2487,17 @@ function renderMasterTravelPlan() {
     .toLocaleDateString(undefined, { month: "long", year: "numeric" });
   $("master-travelplan-count").textContent = `${rows.length} trip${rows.length === 1 ? "" : "s"}`;
   $("tbl-master-travelplan").innerHTML = `<thead><tr>
-    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Meetings</th><th>Events</th><th>Remarks</th><th>Status</th><th>Decided by</th>
+    <th>Filed by</th><th>Trip</th><th>Plans</th><th>Status</th>
     </tr></thead><tbody>${
-      rows.length ? rows.map((p) => `<tr>
-        <td>${esc(p.rmName || p.rmEmail)}</td><td class="name">${esc(p.destination)}</td>
-        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
-        <td class="num">${p.meetingsPlanned ?? 0}</td><td class="num">${p.eventsPlanned || 0}</td>
-        <td class="wrap">${esc(p.remarks || "")}</td>
-        <td>${tpStatusTag(p.status)}</td><td>${esc(p.status !== TP_STATUS.PENDING ? (p.approvedByName || "") : "")}</td></tr>`).join("")
-        : `<tr><td colspan="9" class="empty">No trips this month.</td></tr>`
+      rows.length ? rows.map((p) => `<tr class="m-main">
+        <td class="m-who">${esc(p.rmName || p.rmEmail)}</td>
+        <td class="name">${esc(p.destination)}<div class="m-sub">${esc(tripWhen(p))}</div></td>
+        <td>${esc(tripCounts(p))}</td>
+        <td>${tpStatusTag(p.status)}${p.status !== TP_STATUS.PENDING && p.approvedByName ? `<div class="m-sub">by ${esc(p.approvedByName)}</div>` : ""}</td></tr>
+        ${notesRowHtml(4, "Remarks", p.remarks) || '<tr class="m-rem m-rem-empty"><td colspan="4"></td></tr>'}`).join("")
+        : `<tr><td colspan="4" class="empty">No trips this month.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-master-travelplan"));
 }
 $("master-travelplan-month").value = thisMonth();
 $("master-travelplan-month").addEventListener("change", renderMasterTravelPlan);
@@ -2502,27 +2520,30 @@ function renderApprovals() {
 
   $("approvals-sub").textContent = `${pending.length} plan${pending.length === 1 ? "" : "s"} waiting on you.`;
   $("approvals-pending-count").textContent = `${pending.length} row${pending.length === 1 ? "" : "s"}`;
+  // Approve / Reject sit in a narrow last column that's always on screen.
   $("tbl-approvals-pending").innerHTML = `<thead><tr>
-    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Meetings</th><th>Events</th><th>Remarks</th><th></th>
+    <th>Filed by</th><th>Trip</th><th>Plans</th><th></th>
     </tr></thead><tbody>${
-      pending.length ? pending.map((p) => `<tr>
-        <td>${esc(p.rmName)}</td><td class="name">${esc(p.destination)}</td>
-        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
-        <td class="num">${p.meetingsPlanned}</td><td class="num">${p.eventsPlanned || 0}</td>
-        <td class="wrap">${esc(p.remarks || "")}</td>
-        <td><button class="btn-link" data-approve="${p.id}">Approve</button> · <button class="btn-link danger" data-reject="${p.id}">Reject</button></td></tr>`).join("")
-        : `<tr><td colspan="8" class="empty">Nothing pending.</td></tr>`
+      pending.length ? pending.map((p) => `<tr class="m-main">
+        <td class="m-who">${esc(p.rmName)}</td>
+        <td class="name">${esc(p.destination)}<div class="m-sub">${esc(tripWhen(p))}</div></td>
+        <td>${esc(tripCounts(p))}</td>
+        <td class="m-act"><button class="btn-link" data-approve="${p.id}">Approve</button> <button class="btn-link danger" data-reject="${p.id}">Reject</button></td></tr>
+        ${notesRowHtml(4, "Remarks", p.remarks) || '<tr class="m-rem m-rem-empty"><td colspan="4"></td></tr>'}`).join("")
+        : `<tr><td colspan="4" class="empty">Nothing pending.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-approvals-pending"));
 
   $("approvals-decided-count").textContent = `${decided.length} row${decided.length === 1 ? "" : "s"}`;
   $("tbl-approvals-decided").innerHTML = `<thead><tr>
-    <th>Filed by</th><th>Destination</th><th>From</th><th>To</th><th>Status</th><th>Decided by</th>
+    <th>Filed by</th><th>Trip</th><th>Plans</th><th>Status</th>
     </tr></thead><tbody>${
       decided.length ? decided.map((p) => `<tr>
-        <td>${esc(p.rmName)}</td><td class="name">${esc(p.destination)}</td>
-        <td class="num">${esc(fmtDMY(p.fromDate))}</td><td class="num">${esc(fmtDMY(p.toDate))}</td>
-        <td>${tpStatusTag(p.status)}</td><td>${esc(p.approvedByName || "")}</td></tr>`).join("")
-        : `<tr><td colspan="6" class="empty">Nothing decided yet.</td></tr>`
+        <td>${esc(p.rmName)}</td>
+        <td class="name">${esc(p.destination)}<div class="m-sub">${esc(tripWhen(p))}</div></td>
+        <td>${esc(tripCounts(p))}</td>
+        <td>${tpStatusTag(p.status)}${p.approvedByName ? `<div class="m-sub">by ${esc(p.approvedByName)}</div>` : ""}</td></tr>`).join("")
+        : `<tr><td colspan="4" class="empty">Nothing decided yet.</td></tr>`
     }</tbody>`;
 
   $("tbl-approvals-pending").querySelectorAll("[data-approve]").forEach((b) =>
@@ -2798,22 +2819,14 @@ function renderHistory(mine) {
   $("history-count").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
 
   const fuIdx = followUpIndex();
-  $("tbl-history").innerHTML = `<thead><tr>
-    <th>Date</th><th>Name</th><th>Type</th><th>Meeting</th><th>Mode</th>
-    <th>Phone</th><th>Email</th><th>Address</th><th>Source</th><th>Result</th>
-    <th>Lead / docs</th><th>Follow-up</th><th>Remarks</th><th></th>
-    </tr></thead><tbody>${
-      rows.length ? rows.map((r) => `<tr>
-        <td class="num">${esc(fmtDMY(r.date))}</td><td class="name"><button class="btn-link name-link" data-history="${esc(r.phone)}">${esc(r.prospectName)}</button></td>
-        <td>${esc(r.personType)}</td><td>${esc(r.meetingType)}</td><td>${esc(r.mode)}</td>
-        <td>${esc(r.phone || "")}</td><td>${esc(r.email || "")}</td><td class="wrap">${esc(r.address || "")}</td>
-        <td>${esc(sourceDetail(r))}</td><td>${resultTag(r.result)}</td>
-        <td>${esc(r.shared || "—")}</td>
-        <td class="num">${followUpCell(r, fuIdx)}</td>
-        <td class="wrap">${esc(r.remarks || "")}</td>
-        <td><button class="btn-link" data-edit="${r.id}">Edit</button></td></tr>`).join("")
-        : `<tr><td colspan="14" class="empty">Nothing logged in this range.</td></tr>`
+  // Same layout as Master's Every meeting: no sideways scrolling, remarks
+  // on their own line, Edit always visible in the last column.
+  const hOpts = { date: true, rm: false, action: (r) => `<button class="btn-link" data-edit="${r.id}">Edit</button>` };
+  $("tbl-history").innerHTML = `${meetingHead(hOpts)}<tbody>${
+      rows.length ? meetingRowsHtml(rows.map((r) => [r]), fuIdx, hOpts)
+        : `<tr><td colspan="${MEETING_COLS(hOpts)}" class="empty">Nothing logged in this range.</td></tr>`
     }</tbody>`;
+  wireRemarks($("tbl-history"));
 
   $("tbl-history").querySelectorAll("[data-history]").forEach((b) =>
     b.addEventListener("click", () => showContactHistory(b.dataset.history)));
@@ -3274,7 +3287,7 @@ function renderMaster() {
   $("all-count").textContent = `${groups.length} meeting${groups.length === 1 ? "" : "s"}`;
   const fuIdx = followUpIndex();
   $("tbl-all").innerHTML = `${meetingHead(true)}<tbody>${
-      groups.length ? meetingRowsHtml(groups, fuIdx, true)
+      groups.length ? meetingRowsHtml(groups, fuIdx, { date: true })
         : `<tr><td colspan="${MEETING_COLS(true)}" class="empty">No meetings this month.</td></tr>`
     }</tbody>`;
   wireRemarks($("tbl-all"));
@@ -3363,7 +3376,7 @@ function renderDayView() {
   $("day-all-count").textContent = `${groups.length} meeting${groups.length === 1 ? "" : "s"}`;
   const fuIdx = followUpIndex();
   $("tbl-day-all").innerHTML = `${meetingHead(false)}<tbody>${
-      groups.length ? meetingRowsHtml(groups, fuIdx, false)
+      groups.length ? meetingRowsHtml(groups, fuIdx, { date: false })
         : `<tr><td colspan="${MEETING_COLS(false)}" class="empty">No meetings on this day.</td></tr>`
     }</tbody>`;
   wireRemarks($("tbl-day-all"));
@@ -3751,19 +3764,21 @@ function renderContacts() {
   selectedContacts.forEach((id) => { if (!visibleIds.has(id)) selectedContacts.delete(id); });
   updateTransferButton();
 
-  const ownerCol = mine ? "" : "<th>Owner</th><th>Employee ID</th>";
+  // Contact (name + ID) | Segment | Phone & email | Address | Owner (+ employee ID) | Delete —
+  // grouped so Delete stays on screen at laptop widths.
+  const ownerCol = mine ? "" : "<th>Owner</th>";
   const checkCol = isSuperAdmin() ? "<th></th>" : "";
   const actionCol = isSuperAdmin() ? "<th></th>" : "";
-  const colCount = (mine ? 6 : 8) + (isSuperAdmin() ? 2 : 0);
+  const colCount = (mine ? 4 : 5) + (isSuperAdmin() ? 2 : 0);
 
   $("tbl-contacts").innerHTML = `<thead><tr>
-    ${checkCol}<th>ID</th><th>Name</th><th>Segment</th><th>Phone</th><th>Email</th><th class="wrap">Address</th>${ownerCol}${actionCol}
+    ${checkCol}<th>Contact</th><th>Segment</th><th>Phone &amp; email</th><th>Address</th>${ownerCol}${actionCol}
     </tr></thead><tbody>${
       rows.length ? rows.map((c) => `<tr>
         ${isSuperAdmin() ? `<td><input type="checkbox" class="contact-check" data-id="${esc(c.id)}"${selectedContacts.has(c.id) ? " checked" : ""} /></td>` : ""}
-        <td class="num">${esc(c.id)}</td><td class="name">${esc(c.name)}</td><td>${esc(c.segment)}</td>
-        <td>${esc(c.phone)}</td><td>${esc(c.email || "")}</td><td class="wrap">${esc(c.address || "")}</td>
-        ${mine ? "" : `<td>${esc(c.createdByName || c.createdByEmail || "")}</td><td>${esc(c.createdByEmployeeId || "")}</td>`}
+        <td class="name">${esc(c.name)}<div class="m-sub mono">${esc(c.id)}</div></td><td>${esc(c.segment)}</td>
+        <td class="m-meet">${esc(c.phone)}${c.email ? `<div class="m-sub">${esc(c.email)}</div>` : ""}</td><td class="wrap">${esc(c.address || "")}</td>
+        ${mine ? "" : `<td class="m-who">${esc(c.createdByName || c.createdByEmail || "")}${c.createdByEmployeeId ? `<div class="m-sub">${esc(c.createdByEmployeeId)}</div>` : ""}</td>`}
         ${isSuperAdmin() ? `<td><button class="btn-link danger" data-delete-contact="${esc(c.id)}">Delete</button></td>` : ""}
         </tr>`).join("")
         : `<tr><td colspan="${colCount}" class="empty">Nothing on file yet.</td></tr>`
@@ -4044,3 +4059,22 @@ new MutationObserver((muts) => {
     }
   }
 }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
+
+
+/* ============================ header alignment ============================ */
+// A header takes its column's alignment: if the first body row's cell in
+// that column is right-aligned (class "num"), so is the header. Runs after
+// every table render, for every table, so headers and values never drift.
+function alignTableHeaders(table) {
+  const head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+  const body = table.tBodies[0] && [...table.tBodies[0].rows].find((r) => !r.classList.contains("m-rem") && r.cells.length > 1);
+  if (!head || !body) return;
+  [...head.cells].forEach((th, i) => {
+    const td = body.cells[i];
+    if (td && td.classList.contains("num")) th.classList.add("num");
+  });
+}
+new MutationObserver((muts) => {
+  const seen = new Set();
+  muts.forEach((m) => { const t = m.target.closest ? m.target.closest("table") : null; if (t && !seen.has(t)) { seen.add(t); alignTableHeaders(t); } });
+}).observe(document.body, { subtree: true, childList: true });
