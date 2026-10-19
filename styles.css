@@ -71,6 +71,7 @@
    contrast, not flipped.
    ============================================================ */
 :root[data-theme="dark"]{
+  color-scheme:dark;        /* native date/month pickers and their icons draw light-on-dark */
   --ink:#F3ECE1;
   --ink-2:#E4D9C8;
   --ink-3:#A89878;
@@ -652,7 +653,7 @@ div.fu-status{margin-left:0}
 .joint-who{font-weight:600;color:var(--ink-2)}
 
 /* meeting lists: 5 compact columns + a remarks row that wraps to the visible width */
-#tbl-all td, #tbl-day-all td{vertical-align:top}
+tr.m-main td{vertical-align:top}
 #tbl-all, #tbl-day-all{min-width:0}
 tr.m-main td{border-bottom:none;padding-bottom:4px}
 tr.m-rem td{padding-top:0;padding-bottom:12px;border-bottom:1px solid var(--rule)}
@@ -700,3 +701,10 @@ input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="tr
 #tbl-team .team-edit{width:100%;min-width:0;max-width:180px;padding:6px 8px;font-size:13px}
 #tbl-team .manager-select,#tbl-team .role-select{font-size:12.5px;padding:5px 26px 5px 8px;max-width:190px}
 #tbl-team td{vertical-align:middle}
+
+/* grouped table cells used across Master, Approvals, Contacts, History */
+td.m-when{white-space:normal;min-width:110px;max-width:150px;font-family:var(--f-data);font-size:13px;line-height:1.4}
+td.m-act{white-space:nowrap;text-align:right}
+tr.m-rem-empty td{padding:0 0 4px;border-bottom:1px solid var(--rule)}
+/* the planner's add button sits to the right, sized to its label */
+.agenda-form > .btn{justify-self:end}
