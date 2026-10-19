@@ -110,13 +110,32 @@ function syncOffDayNote(inputId, noteId) {
   $(noteId).hidden = !note;
 }
 
-let toastTimer;
-function toast(msg) {
+// toast(msg) — or toast(msg, { label, run }) to offer one action (e.g. Undo).
+// It leaves the way it arrived (slides down and fades), and the #toast
+// element is a polite live region, so screen readers announce it.
+let toastTimer, toastLeaveTimer;
+function toast(msg, action) {
   const t = $("toast");
-  t.textContent = msg;
+  clearTimeout(toastTimer); clearTimeout(toastLeaveTimer);
+  t.classList.remove("leaving");
+  t.innerHTML = "";
+  const span = document.createElement("span");
+  span.textContent = msg;
+  t.appendChild(span);
+  if (action) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "toast-action"; b.textContent = action.label;
+    b.addEventListener("click", () => { hideToast(); action.run(); });
+    t.appendChild(b);
+  }
   t.hidden = false;
+  toastTimer = setTimeout(hideToast, action ? 6000 : 2600);
+}
+function hideToast() {
+  const t = $("toast");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  t.classList.add("leaving");
+  toastLeaveTimer = setTimeout(() => { t.hidden = true; t.classList.remove("leaving"); }, 180);
 }
 
 function fillSelect(el, values, { blank = false } = {}) {
@@ -156,10 +175,19 @@ function showContactHistory(phone) {
       </div>
       ${r.remarks ? `<div class="history-entry-remarks">${esc(r.remarks)}</div>` : `<div class="history-entry-remarks" style="color:var(--ink-3)">No remarks recorded.</div>`}
     </article>`).join("");
+  historyReturnFocus = document.activeElement;
   $("history-modal").hidden = false;
+  $("btn-history-close").focus();
 }
-$("btn-history-close").addEventListener("click", () => { $("history-modal").hidden = true; });
-$("history-modal").addEventListener("click", (e) => { if (e.target.id === "history-modal") $("history-modal").hidden = true; });
+let historyReturnFocus = null;
+function closeHistory() {
+  if ($("history-modal").hidden) return;
+  $("history-modal").hidden = true;
+  if (historyReturnFocus && historyReturnFocus.focus) historyReturnFocus.focus();
+}
+$("btn-history-close").addEventListener("click", closeHistory);
+$("history-modal").addEventListener("click", (e) => { if (e.target.id === "history-modal") closeHistory(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHistory(); });
 
 function sourceDetail(r) {
   if (!r.source) return "—";
@@ -262,9 +290,7 @@ $("btn-resend").addEventListener("click", async () => {
   } catch (e) { toast(authMessage(e)); }
 });
 
-const doSignOut = () => {
-  if (confirm("Sign out of Meeting Ledger?")) signOut(auth);
-};
+const doSignOut = () => signOut(auth);   // reversible — no confirmation pop-up
 $("btn-signout").addEventListener("click", doSignOut);
 
 // Theme toggle. The inline script in <head> already applied any saved
@@ -350,7 +376,7 @@ onAuthStateChanged(auth, async (user) => {
 
   buildTabs();
   await loadAll();
-  show(hasWideView() ? "master" : "log");
+  routeFromHash(hasWideView() ? "master" : "log");
 });
 
 /* ============================ navigation ============================ */
@@ -378,7 +404,28 @@ function show(page) {
   if (page === "team") { populateRoleOptions(); renderTeam(); }
   if (page === "contacts") renderContacts();
   if (page === "approvals") renderApprovals();
+  saveRoute();
 }
+
+// ---- where am I: page + sub-tab kept in the address (#master/sheets), so a
+// refresh returns to the same place and a link can point straight at it.
+function saveRoute() {
+  const page = state.page;
+  if (!page) return;
+  const sel = document.querySelector(`#page-${page} .subtabs .subtab[aria-selected="true"]`);
+  const hash = `#${page}${sel ? "/" + sel.dataset.sub : ""}`;
+  if (location.hash !== hash) history.replaceState(null, "", hash);
+}
+function routeFromHash(fallback) {
+  const [page, sub] = location.hash.replace(/^#/, "").split("/");
+  const tab = page && document.querySelector(`.tab[data-page="${page}"]`);
+  show(tab ? page : fallback);
+  if (tab && sub) {
+    const st = document.querySelector(`#page-${page} .subtabs .subtab[data-sub="${sub}"]`);
+    if (st) st.click();
+  }
+}
+document.addEventListener("click", (e) => { if (e.target.closest(".subtabs .subtab")) setTimeout(saveRoute, 0); });
 
 /* ============================ data ============================ */
 async function loadAll() {
@@ -1527,7 +1574,7 @@ function renderLog() {
 
   $("rm-strip").innerHTML = [
     ["Reachouts", s.total], ["First", s.first], ["Follow-ups", s.followup],
-    ["Interested", s.allInterested], ["Lead / docs in", s.allShared], ["Converted", s.allDone]
+    ["Interested", s.allInterested], ["Lead / docs shared", s.allShared], ["Meeting done / logged in", s.allDone]
   ].map(([label, v]) => `<div class="stat"><b>${v}</b><span>${label}</span></div>`).join("");
 
   renderPlanCard();
@@ -1557,7 +1604,7 @@ function renderLog() {
       <div class="entry-top">
         <span class="entry-name">${esc(r.prospectName)}</span>
         ${resultTag(r.result)}
-        ${r.shared === "Yes" ? `<span class="tag tag-flat">${r.personType === "Investor" ? "Docs in" : "Lead in"}</span>` : ""}
+        ${r.shared === "Yes" ? `<span class="tag tag-flat">${r.personType === "Investor" ? "Docs shared" : "Lead shared"}</span>` : ""}
         ${r.progressed === "Yes" ? `<span class="tag tag-green">${r.personType === "Investor" ? "Logged in" : "Met"}</span>` : ""}
       </div>
       <div class="entry-meta">${bits} · ${esc(r.phone)}${r.email ? " · " + esc(r.email) : ""} · ${esc(r.address)}</div>
@@ -1933,12 +1980,22 @@ async function toggleWeeklyPlanStatus(id) {
 async function deleteWeeklyPlan(id) {
   const p = state.weeklyPlans.find((x) => x.id === id);
   if (!p) return;
-  if (!confirm(`Remove ${p.name} from your plan?`)) return;
+  // Small, reversible: remove at once and offer Undo instead of a pop-up.
+  const { id: _id, ...saved } = p;
   try {
     await deleteDoc(doc(db, "weeklyPlans", id));
     await syncSlot(`plan_${id}`, null);
     state.weeklyPlans = state.weeklyPlans.filter((x) => x.id !== id);
     renderWeeklyPlan();
+    toast(`Removed ${p.name}`, { label: "Undo", run: async () => {
+      try {
+        await setDoc(doc(db, "weeklyPlans", id), saved);
+        await syncSlot(`plan_${id}`, slotOfPlan(id, saved));
+        await loadWeeklyPlans();
+        renderWeeklyPlan();
+        toast("Restored");
+      } catch (e2) { toast("Couldn't restore that. " + (e2.message || "")); }
+    } });
   } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
 }
 
@@ -2226,11 +2283,19 @@ async function reopenAgendaItem(id) {
 async function deleteAgendaItem(id) {
   const a = state.weekAgendas.find((x) => x.id === id);
   if (!a) return;
-  if (!confirm(`Remove "${a.text}" from your planner?`)) return;
+  const { id: _id, ...saved } = a;
   try {
     await deleteDoc(doc(db, "weekAgendas", id));
     state.weekAgendas = state.weekAgendas.filter((x) => x.id !== id);
     renderAgenda();
+    toast("Removed from your planner", { label: "Undo", run: async () => {
+      try {
+        await setDoc(doc(db, "weekAgendas", id), saved);
+        await loadWeekAgendas();
+        renderAgenda();
+        toast("Restored");
+      } catch (e2) { toast("Couldn't restore that. " + (e2.message || "")); }
+    } });
   } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
 }
 
@@ -2937,9 +3002,9 @@ function renderDashStrip(s, rmCount) {
   const items = [
     ["Reachouts", s.total, false],
     ["Interested", s.allInterested, false],
-    ["Lead / docs in", s.allShared, false],
-    ["Converted", s.allDone, true],
-    ["Conversion", rate + "%", false],
+    ["Lead / docs shared", s.allShared, false],
+    ["Meeting done / logged in", s.allDone, true],
+    ["Conversion rate", rate + "%", false],
     ["Active RMs", rmCount, false]
   ];
   $("dash-strip").innerHTML = items.map(([label, v, accent]) =>
@@ -3044,7 +3109,7 @@ function renderFunnelInto(containerId, rows, s, emptyLabel) {
     ["Reachouts", s.total],
     ["Interested", s.allInterested],
     ["Lead / docs shared", s.allShared],
-    ["Meeting done · logged in", s.allDone]
+    ["Meeting done / logged in", s.allDone]
   ];
   const top = Math.max(s.total, 1);
   $(containerId).innerHTML = s.total === 0
@@ -3095,10 +3160,10 @@ function renderMasterChips(baseRows) {
 function renderStatGrid(containerId, s) {
   const cells = [
     ["Reachouts", s.total], ["First", s.first], ["Follow-ups", s.followup],
-    ["Interested", s.allInterested], ["Lead / docs in", s.allShared], ["Converted", s.allDone]
+    ["Interested", s.allInterested], ["Lead / docs shared", s.allShared], ["Meeting done / logged in", s.allDone]
   ];
   $(containerId).innerHTML = cells.map(([label, v]) =>
-    `<div class="sg-card"><div class="sg-num">${v}</div><div class="sg-label">${esc(label)}</div></div>`).join("");
+    `<div class="dstat"><b>${v}</b><span>${esc(label)}</span></div>`).join("");
 }
 
 function renderMaster() {
@@ -3116,7 +3181,8 @@ function renderMaster() {
   $("master-sub").textContent = (who
     ? `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} · ${who} only.`
     : `${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"} across ${rmCount} relationship manager${rmCount === 1 ? "" : "s"}.`)
-    + (jointCount ? ` Joint meetings count once in firm totals (first entry logged) but count for each person in their own numbers, so per-person totals can add up to more.` : "");
+    + (jointCount ? ` Includes ${jointCount} joint meeting${jointCount === 1 ? "" : "s"}, counted once.` : "");
+  $("master-sub").title = jointCount ? "A joint meeting counts once in firm totals (using the first entry logged) and once for each person in their own numbers, so per-person totals can add up to more than the firm total." : "";
 
   $("filters-summary-chip").textContent = who ? `${who} · ${label}` : label;
 
@@ -3844,7 +3910,7 @@ function renderTeam() {
   };
 
   $("tbl-team").innerHTML = `<thead><tr>
-    <th>Name</th><th>Email</th><th>Designation</th><th>Employee ID</th><th>Role</th><th>Reports to</th>
+    <th>Name &amp; email</th><th>Designation</th><th>Employee ID</th><th>Role</th><th>Reports to</th>
     <th>Status</th><th class="num">Meetings logged</th><th></th>
     </tr></thead><tbody>${
       state.team.length ? state.team.map((u) => {
@@ -3855,8 +3921,7 @@ function renderTeam() {
           ? `<select class="role-select" data-role="${esc(u.email)}">${roleOptions(u.role)}</select>`
           : `<span class="tag ${u.role === "superadmin" || u.role === "admin" ? "tag-green" : u.role === "teamlead" ? "tag-green" : u.role === "observer" ? "tag-amber" : u.role === "founder" ? "tag-amber" : "tag-flat"}">${roleLabel(u.role)}</span>`;
         return `<tr>
-          <td class="name">${canManage ? editField(u.email, "name", u.name) : esc(u.name || "—")}</td>
-          <td>${esc(u.email)}</td>
+          <td class="name">${canManage ? editField(u.email, "name", u.name) : esc(u.name || "—")}<div class="m-sub">${esc(u.email)}</div></td>
           <td>${canManage ? editField(u.email, "designation", u.designation) : esc(u.designation || "—")}</td>
           <td>${canManage ? editField(u.email, "employeeId", u.employeeId) : esc(u.employeeId || "—")}</td>
           <td>${roleCell}</td>
@@ -3865,7 +3930,7 @@ function renderTeam() {
           <td class="num">${count}</td>
           <td>${canManage ? `<button class="btn-link${u.active === false ? "" : " danger"}" data-toggle="${esc(u.email)}">${u.active === false ? "Restore access" : "Remove access"}</button>` : ""}</td>
         </tr>`;
-      }).join("") : `<tr><td colspan="9" class="empty">Nobody added yet.</td></tr>`
+      }).join("") : `<tr><td colspan="8" class="empty">Nobody added yet.</td></tr>`
     }</tbody>`;
 
   $("tbl-team").querySelectorAll("[data-manager]").forEach((sel) =>
@@ -3934,3 +3999,48 @@ function renderTeam() {
 
 /* ============================ off-day note on the follow-up date ============================ */
 $("f-followUpDate").addEventListener("change", () => syncOffDayNote("f-followUpDate", "f-followUp-offday"));
+
+
+/* ============================ inline validation (all forms) ============================ */
+// Before any form's own submit handler runs: every visible, enabled,
+// required field that's empty is outlined in red with "Required" under it,
+// and the first one is focused and scrolled into view. The form's own
+// checks (phone format, dates…) still run once these are filled.
+function fieldWrap(el) { return el.closest(".field") || el.parentElement; }
+function clearInvalid(el) {
+  el.removeAttribute("aria-invalid");
+  const msg = fieldWrap(el).querySelector(":scope > .field-msg");
+  if (msg) msg.remove();
+}
+document.querySelectorAll("form").forEach((form) => {
+  form.addEventListener("submit", (e) => {
+    const bad = [...form.querySelectorAll("input[required], select[required], textarea[required]")]
+      .filter((el) => !el.disabled && !el.readOnly && el.offsetParent !== null && !String(el.value).trim());
+    form.querySelectorAll("[aria-invalid]").forEach(clearInvalid);
+    if (!bad.length) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    bad.forEach((el) => {
+      el.setAttribute("aria-invalid", "true");
+      const msg = document.createElement("span");
+      msg.className = "field-msg";
+      msg.textContent = "Required";
+      fieldWrap(el).appendChild(msg);
+    });
+    bad[0].focus({ preventScroll: true });
+    bad[0].scrollIntoView({ block: "center", behavior: "smooth" });
+  }, true);
+  const onEdit = (e) => { if (e.target.getAttribute && e.target.getAttribute("aria-invalid")) clearInvalid(e.target); };
+  form.addEventListener("input", onEdit);
+  form.addEventListener("change", onEdit);
+});
+// Any form-level error that appears off-screen is brought into view.
+new MutationObserver((muts) => {
+  for (const m of muts) {
+    const el = m.target;
+    if (el.classList && el.classList.contains("form-error") && !el.hidden) {
+      const r = el.getBoundingClientRect();
+      if (r.top < 60 || r.bottom > innerHeight) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
