@@ -3597,7 +3597,9 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
   });
   // Working days in the range up to today — the days a plan was possible.
   const lastDay = to < todayISO() ? to : todayISO();
-  const workingDays = from <= lastDay ? eachDateISO(from, lastDay).filter((iso) => officeDay(iso).working).length : 0;
+  const workingList = from <= lastDay ? eachDateISO(from, lastDay).filter((iso) => officeDay(iso).working) : [];
+  // Each person's working days exclude their own leave.
+  const workingDaysFor = (email) => { if (!workingList.length) return 0; const off = leaveDaysFor(email, from, lastDay); return workingList.filter((d) => !off.has(d)).length; };
 
   const plannedByEmail = new Map();
   plansInRange.forEach((p) => {
@@ -3626,7 +3628,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
       ${cell(p.fuChannel, a.fuChannel)}${cell(p.fuCustomer, a.fuCustomer)}
       <td class="num">${plannedTotal} / ${actualTotal}</td>
       <td class="num">${pct === null ? "—" : pct + "%"}</td>
-      <td class="num">${(plannedDays.get(u.email) || new Set()).size} / ${workingDays}</td>
+      <td class="num">${(plannedDays.get(u.email) || new Set()).size} / ${workingDaysFor(u.email)}</td>
       <td class="num">${unplannedByEmail.get(u.email) || 0}</td></tr>`;
   }).join("");
 
@@ -4097,13 +4099,29 @@ const nowHHMM = () => { const d = new Date(); return `${pad2(d.getHours())}:${pa
 const roundDown15 = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(Math.floor(d.getMinutes() / 15) * 15)}`; };
 const plusHours = (hhmm, h) => { const [a, b] = hhmm.split(":").map(Number); const m = Math.min(a * 60 + b + h * 60, 23 * 60 + 59); return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`; };
 
+// Out of office (a few hours) and Leave (full days) — the two Calendar entry
+// types Meeting Ledger tracks. One query per type, each matching the rules.
 async function loadAway() {
   state.away = [];
   if (!canLogHere() && !isObserver()) return;
-  try {
-    const snap = await getDocs(query(collection(db, "calEvents"), where("kind", "==", "ooo")));
-    state.away = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  } catch (e) { console.warn("Out-of-office entries not readable yet — publish the latest firestore.rules:", e); }
+  for (const kind of ["ooo", "leave"]) {
+    try {
+      const snap = await getDocs(query(collection(db, "calEvents"), where("kind", "==", kind)));
+      state.away.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch (e) { console.warn(`"${kind}" entries not readable yet — publish the latest firestore.rules:`, e); }
+  }
+}
+const isLeave = (a) => a.kind === "leave";
+const dmShort = (iso) => localDate(iso).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+// Leave days per person inside a range (working days only) — used to take
+// leave out of "working days" in Plan vs achievement.
+function leaveDaysFor(email, from, to) {
+  const days = new Set();
+  state.away.filter((a) => isLeave(a) && a.ownerEmail === email).forEach((a) => {
+    const s = a.date > from ? a.date : from, e = (a.endDate || a.date) < to ? (a.endDate || a.date) : to;
+    if (s <= e) eachDateISO(s, e).forEach((iso) => days.add(iso));
+  });
+  return days;
 }
 // Whose entries this person may see in Meeting Ledger.
 function awayVisible() {
@@ -4113,15 +4131,35 @@ function awayVisible() {
   return state.away.filter((a) => a.ownerEmail === me);
 }
 const awayCovers = (a, iso) => (a.date || "") <= iso && (a.endDate || a.date || "") >= iso;
-const awayTime = (a) => a.allDay ? "All day" : `${a.start}–${a.end}`;
+const awayTime = (a) => isLeave(a)
+  ? (a.date === (a.endDate || a.date) ? `Leave · ${dmShort(a.date)}` : `Leave · ${dmShort(a.date)} – ${dmShort(a.endDate)}`)
+  : a.allDay ? "All day" : `${a.start}–${a.end}`;
 const awayNowOn = (a) => awayCovers(a, todayISO()) && (a.allDay || (a.start <= nowHHMM() && nowHHMM() < a.end));
 
+let awayKind = "ooo";
+function syncAwayKind() {
+  const leave = awayKind === "leave";
+  document.querySelectorAll(".aw-kind-btn").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.kind === awayKind)));
+  document.querySelectorAll("#away-form .aw-time, #away-form .aw-where").forEach((el) => { el.hidden = leave; });
+  document.querySelector("#away-form .aw-leave").hidden = !leave;
+  $("aw-start").required = !leave; $("aw-end").required = !leave; $("aw-where").required = !leave;
+  $("aw-enddate").required = leave;
+  $("lbl-aw-date").textContent = leave ? "From" : "Date";
+  $("lbl-aw-reason").textContent = leave ? "Note" : "Reason";
+  $("aw-reason").placeholder = leave ? "e.g. Family function" : "e.g. Client site visit";
+  $("away-form").classList.toggle("is-leave", leave);
+  if (leave && (!$("aw-enddate").value || $("aw-enddate").value < $("aw-date").value)) $("aw-enddate").value = $("aw-date").value;
+}
+document.querySelectorAll(".aw-kind-btn").forEach((b) => b.addEventListener("click", () => { awayKind = b.dataset.kind; syncAwayKind(); }));
+$("aw-date").addEventListener("change", () => { if (awayKind === "leave") syncAwayKind(); });
 function resetAwayForm() {
   $("aw-date").value = todayISO();
+  $("aw-enddate").value = todayISO();
   $("aw-start").value = roundDown15();
   $("aw-end").value = plusHours(roundDown15(), 2);
   $("aw-where").value = ""; $("aw-reason").value = "";
   $("away-error").hidden = true;
+  syncAwayKind();
 }
 resetAwayForm();
 
@@ -4132,16 +4170,22 @@ $("away-form").addEventListener("submit", async (e) => {
   const fail = (m) => { err.textContent = m; err.hidden = false; };
   const date = $("aw-date").value, start = $("aw-start").value, end = $("aw-end").value;
   const where = $("aw-where").value.trim(), reason = $("aw-reason").value.trim();
-  if (!date || !start || !end || !where) return fail("Add the date, times and where you'll be.");
-  if (end <= start) return fail("“Until” has to be after “From”.");
+  const owner = { ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
+    source: "meeting-ledger", createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
   try {
-    await addDoc(collection(db, "calEvents"), {
-      kind: "ooo", title: where, notes: reason, allDay: false,
-      date, endDate: date, start, end,
-      ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
-      source: "meeting-ledger", createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-    });
-    toast(`Noted: out ${start}–${end}`);
+    if (awayKind === "leave") {
+      // Saved exactly like a Calendar leave entry: all day, spanning the dates.
+      const endDate = $("aw-enddate").value;
+      if (!date || !endDate) return fail("Pick the first and last day of your leave.");
+      if (endDate < date) return fail("“To” can't be before “From”.");
+      await addDoc(collection(db, "calEvents"), { kind: "leave", title: reason, notes: "", allDay: true, date, endDate, start: "", end: "", ...owner });
+      toast(date === endDate ? `Leave noted for ${dmShort(date)}` : `Leave noted: ${dmShort(date)} – ${dmShort(endDate)}`);
+    } else {
+      if (!date || !start || !end || !where) return fail("Add the date, times and where you'll be.");
+      if (end <= start) return fail("“Until” has to be after “From”.");
+      await addDoc(collection(db, "calEvents"), { kind: "ooo", title: where, notes: reason, allDay: false, date, endDate: date, start, end, ...owner });
+      toast(`Noted: out ${start}–${end}`);
+    }
     resetAwayForm();
     await loadAway();
     renderAwayMine();
@@ -4158,11 +4202,11 @@ function renderAwayMine() {
   $("away-mine").innerHTML = mine.map((a) => `
     <div class="away-item">
       <div>
-        <div class="away-when">${a.date === today ? "Today" : esc(fmtDay(a.date))} · ${esc(awayTime(a))}${awayNowOn(a) ? ' <span class="tag tag-amber">Out now</span>' : ""}</div>
-        <div class="away-where">${esc(a.title || "")}${a.notes ? ` <span class="m-sub away-reason">· ${esc(a.notes)}</span>` : ""}</div>
+        <div class="away-when">${isLeave(a) ? esc(awayTime(a)) : `${a.date === today ? "Today" : esc(fmtDay(a.date))} · ${esc(awayTime(a))}`}${awayNowOn(a) ? ` <span class="tag tag-amber">${isLeave(a) ? "On leave" : "Out now"}</span>` : ""}</div>
+        ${isLeave(a) ? (a.title ? `<div class="away-where">${esc(a.title)}</div>` : "") : `<div class="away-where">${esc(a.title || "")}${a.notes ? ` <span class="m-sub away-reason">· ${esc(a.notes)}</span>` : ""}</div>`}
       </div>
       <span class="entry-actions">
-        ${awayNowOn(a) && !a.allDay ? `<button class="btn-link" data-away-back="${a.id}">Back in office</button>` : ""}
+        ${awayNowOn(a) && (isLeave(a) || !a.allDay) ? `<button class="btn-link" data-away-back="${a.id}">Back in office</button>` : ""}
         <button class="btn-link danger" data-away-del="${a.id}">Remove</button>
       </span>
     </div>`).join("");
@@ -4174,9 +4218,13 @@ function renderAwayMine() {
 async function backInOffice(id) {
   const a = state.away.find((x) => x.id === id);
   if (!a) return;
-  const now = nowHHMM();
+  const now = nowHHMM(), today = todayISO();
   try {
-    if (now <= a.start) await deleteDoc(doc(db, "calEvents", id));
+    if (isLeave(a)) {
+      // Back early from leave: leave ends yesterday (or is removed if it started today).
+      if (a.date >= today) await deleteDoc(doc(db, "calEvents", id));
+      else await updateDoc(doc(db, "calEvents", id), { endDate: addDaysISO(today, -1), updatedAt: serverTimestamp() });
+    } else if (now <= a.start) await deleteDoc(doc(db, "calEvents", id));
     else await updateDoc(doc(db, "calEvents", id), { end: now, updatedAt: serverTimestamp() });
     toast("Welcome back — marked back in office");
     await loadAway();
@@ -4205,8 +4253,10 @@ function renderAwayNow() {
   if (!el) return;
   const now = awayVisible().filter(awayNowOn).sort((a, b) => (a.ownerName || "").localeCompare(b.ownerName || ""));
   el.hidden = !now.length;
-  el.innerHTML = now.length ? `<span class="away-now-label">Out right now</span>` + now.map((a) =>
-    `<span class="away-chip" title="${esc(a.notes || "")}"><b>${esc(a.ownerName || a.ownerEmail)}</b> · ${esc(a.title || "Out of office")} · ${a.allDay ? "all day" : "until " + esc(a.end)}</span>`).join("") : "";
+  el.innerHTML = now.length ? `<span class="away-now-label">Out of office now</span>` + now.map((a) =>
+    isLeave(a)
+      ? `<span class="away-chip away-chip-leave"><b>${esc(a.ownerName || a.ownerEmail)}</b> · On leave${(a.endDate || a.date) > todayISO() ? " until " + esc(dmShort(a.endDate)) : " today"}</span>`
+      : `<span class="away-chip" title="${esc(a.notes || "")}"><b>${esc(a.ownerName || a.ownerEmail)}</b> · ${esc(a.title || "Out of office")} · ${a.allDay ? "all day" : "until " + esc(a.end)}</span>`).join("") : "";
 }
 
 // Master → Day view: everyone out of office on the chosen day.
@@ -4214,14 +4264,14 @@ function renderDayAway() {
   const day = $("day-view-date").value || todayISO();
   const rmFilter = $("master-rm-filter").value;
   const rows = awayVisible().filter((a) => awayCovers(a, day) && (!rmFilter || a.ownerEmail === rmFilter))
-    .sort((a, b) => (a.start || "").localeCompare(b.start || "") || (a.ownerName || "").localeCompare(b.ownerName || ""));
+    .sort((a, b) => (isLeave(b) - isLeave(a)) || (a.start || "").localeCompare(b.start || "") || (a.ownerName || "").localeCompare(b.ownerName || ""));
   $("day-away-count").textContent = `${rows.length} entr${rows.length === 1 ? "y" : "ies"}`;
-  $("tbl-day-away").innerHTML = `<thead><tr><th>Who</th><th>When</th><th>Where</th><th>Reason</th></tr></thead><tbody>${
+  $("tbl-day-away").innerHTML = `<thead><tr><th>Who</th><th>When</th><th>Where</th><th>Reason / note</th></tr></thead><tbody>${
     rows.length ? rows.map((a) => `<tr>
-      <td class="m-who">${esc(a.ownerName || a.ownerEmail)}${day === todayISO() && awayNowOn(a) ? ' <span class="tag tag-amber">Out now</span>' : ""}</td>
+      <td class="m-who">${esc(a.ownerName || a.ownerEmail)}${day === todayISO() && awayNowOn(a) ? ` <span class="tag tag-amber">${isLeave(a) ? "On leave" : "Out now"}</span>` : ""}</td>
       <td class="m-when">${esc(awayTime(a))}</td>
-      <td class="m-meet">${esc(a.title || "—")}</td>
-      <td class="wrap">${esc(a.notes || "")}</td></tr>`).join("")
+      <td class="m-meet">${isLeave(a) ? "—" : esc(a.title || "—")}</td>
+      <td class="wrap">${esc(isLeave(a) ? (a.title || "") : (a.notes || ""))}</td></tr>`).join("")
       : `<tr><td colspan="4" class="empty">Nobody logged as out of office this day.</td></tr>`
   }</tbody>`;
 }
