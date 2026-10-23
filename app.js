@@ -439,6 +439,7 @@ async function loadAll() {
     loadColleagues(),
     loadWeekAgendas(),
     loadTravelPlans(),
+    loadAway(),
     loadHolidays(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
@@ -1579,6 +1580,7 @@ async function syncLeadsForMeeting(oldMeetingId, newMeetingId, date, prospectNam
 }
 
 function renderLog() {
+  renderAwayMine();
   const m = $("rm-month").value || thisMonth();
   const mine = hasWideView()
     ? state.meetings.filter((r) => r.rmEmail === state.user.email)
@@ -3180,6 +3182,7 @@ function renderStatGrid(containerId, s) {
 }
 
 function renderMaster() {
+  renderAwayNow();
   const { from, to, label } = exportRange();
   const rmFilter = $("master-rm-filter").value;
   // rowsP: every person's own entry (personal numbers). rows: firm view,
@@ -3321,6 +3324,7 @@ function renderMaster() {
 // plus a "before this day" baseline funnel for context. Shares the same
 // "All RMs" filter as Dashboard/Sheets rather than a second one.
 function renderDayView() {
+  renderDayAway();
   const day = $("day-view-date").value || todayISO();
   const rmFilter = $("master-rm-filter").value;
   const scoped = (r) => !rmFilter || r.rmEmail === rmFilter;
@@ -4078,3 +4082,148 @@ new MutationObserver((muts) => {
   const seen = new Set();
   muts.forEach((m) => { const t = m.target.closest ? m.target.closest("table") : null; if (t && !seen.has(t)) { seen.add(t); alignTableHeaders(t); } });
 }).observe(document.body, { subtree: true, childList: true });
+
+
+/* ============================ out of office (shared with Hyperion Calendar) ============================ */
+// Someone stepping out for a few hours logs date, from–until, where and an
+// optional reason. Saved as a Calendar "Out of office" entry (calEvents,
+// kind "ooo"), so it also appears in Hyperion Calendar — colleagues there
+// see just "Out of office"; Admins see the details.
+// Who sees what here: everyone sees their own; a Team Lead sees their
+// reports'; Admin, Superadmin and Observer see everyone's. Observer reads
+// only "ooo" entries (enforced in firestore.rules), never busy/leave/WFH.
+const pad2 = (n) => String(n).padStart(2, "0");
+const nowHHMM = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const roundDown15 = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(Math.floor(d.getMinutes() / 15) * 15)}`; };
+const plusHours = (hhmm, h) => { const [a, b] = hhmm.split(":").map(Number); const m = Math.min(a * 60 + b + h * 60, 23 * 60 + 59); return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`; };
+
+async function loadAway() {
+  state.away = [];
+  if (!canLogHere() && !isObserver()) return;
+  try {
+    const snap = await getDocs(query(collection(db, "calEvents"), where("kind", "==", "ooo")));
+    state.away = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) { console.warn("Out-of-office entries not readable yet — publish the latest firestore.rules:", e); }
+}
+// Whose entries this person may see in Meeting Ledger.
+function awayVisible() {
+  const me = state.user.email;
+  if (canViewAll()) return state.away;
+  if (isTeamLead()) return state.away.filter((a) => a.ownerEmail === me || state.reportEmails.includes(a.ownerEmail));
+  return state.away.filter((a) => a.ownerEmail === me);
+}
+const awayCovers = (a, iso) => (a.date || "") <= iso && (a.endDate || a.date || "") >= iso;
+const awayTime = (a) => a.allDay ? "All day" : `${a.start}–${a.end}`;
+const awayNowOn = (a) => awayCovers(a, todayISO()) && (a.allDay || (a.start <= nowHHMM() && nowHHMM() < a.end));
+
+function resetAwayForm() {
+  $("aw-date").value = todayISO();
+  $("aw-start").value = roundDown15();
+  $("aw-end").value = plusHours(roundDown15(), 2);
+  $("aw-where").value = ""; $("aw-reason").value = "";
+  $("away-error").hidden = true;
+}
+resetAwayForm();
+
+$("away-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("away-error");
+  err.hidden = true;
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  const date = $("aw-date").value, start = $("aw-start").value, end = $("aw-end").value;
+  const where = $("aw-where").value.trim(), reason = $("aw-reason").value.trim();
+  if (!date || !start || !end || !where) return fail("Add the date, times and where you'll be.");
+  if (end <= start) return fail("“Until” has to be after “From”.");
+  try {
+    await addDoc(collection(db, "calEvents"), {
+      kind: "ooo", title: where, notes: reason, allDay: false,
+      date, endDate: date, start, end,
+      ownerEmail: state.user.email, ownerName: state.profile.name || state.user.email,
+      source: "meeting-ledger", createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    toast(`Noted: out ${start}–${end}`);
+    resetAwayForm();
+    await loadAway();
+    renderAwayMine();
+  } catch (e2) { fail("Couldn't save that. " + (e2.message || "")); }
+});
+
+// Your own entries from today on, with "Back in office" while one is running.
+function renderAwayMine() {
+  if (!$("away-card")) return;
+  $("away-card").hidden = !canLogHere();
+  const today = todayISO();
+  const mine = state.away.filter((a) => a.ownerEmail === state.user.email && (a.endDate || a.date) >= today)
+    .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+  $("away-mine").innerHTML = mine.map((a) => `
+    <div class="away-item">
+      <div>
+        <div class="away-when">${a.date === today ? "Today" : esc(fmtDay(a.date))} · ${esc(awayTime(a))}${awayNowOn(a) ? ' <span class="tag tag-amber">Out now</span>' : ""}</div>
+        <div class="away-where">${esc(a.title || "")}${a.notes ? ` <span class="m-sub away-reason">· ${esc(a.notes)}</span>` : ""}</div>
+      </div>
+      <span class="entry-actions">
+        ${awayNowOn(a) && !a.allDay ? `<button class="btn-link" data-away-back="${a.id}">Back in office</button>` : ""}
+        <button class="btn-link danger" data-away-del="${a.id}">Remove</button>
+      </span>
+    </div>`).join("");
+  $("away-mine").querySelectorAll("[data-away-back]").forEach((b) => b.addEventListener("click", () => backInOffice(b.dataset.awayBack)));
+  $("away-mine").querySelectorAll("[data-away-del]").forEach((b) => b.addEventListener("click", () => removeAway(b.dataset.awayDel)));
+}
+
+// Ends a running entry now. If it hasn't actually started, it's removed.
+async function backInOffice(id) {
+  const a = state.away.find((x) => x.id === id);
+  if (!a) return;
+  const now = nowHHMM();
+  try {
+    if (now <= a.start) await deleteDoc(doc(db, "calEvents", id));
+    else await updateDoc(doc(db, "calEvents", id), { end: now, updatedAt: serverTimestamp() });
+    toast("Welcome back — marked back in office");
+    await loadAway();
+    renderAwayMine();
+  } catch (e) { toast("Couldn't update that. " + (e.message || "")); }
+}
+
+async function removeAway(id) {
+  const a = state.away.find((x) => x.id === id);
+  if (!a) return;
+  const { id: _id, ...saved } = a;
+  try {
+    await deleteDoc(doc(db, "calEvents", id));
+    state.away = state.away.filter((x) => x.id !== id);
+    renderAwayMine();
+    toast("Removed", { label: "Undo", run: async () => {
+      try { await setDoc(doc(db, "calEvents", id), saved); await loadAway(); renderAwayMine(); toast("Restored"); }
+      catch (e2) { toast("Couldn't restore that. " + (e2.message || "")); }
+    } });
+  } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
+}
+
+// Master: who is out right now, above the sub-tabs on every Master view.
+function renderAwayNow() {
+  const el = $("away-now");
+  if (!el) return;
+  const now = awayVisible().filter(awayNowOn).sort((a, b) => (a.ownerName || "").localeCompare(b.ownerName || ""));
+  el.hidden = !now.length;
+  el.innerHTML = now.length ? `<span class="away-now-label">Out right now</span>` + now.map((a) =>
+    `<span class="away-chip" title="${esc(a.notes || "")}"><b>${esc(a.ownerName || a.ownerEmail)}</b> · ${esc(a.title || "Out of office")} · ${a.allDay ? "all day" : "until " + esc(a.end)}</span>`).join("") : "";
+}
+
+// Master → Day view: everyone out of office on the chosen day.
+function renderDayAway() {
+  const day = $("day-view-date").value || todayISO();
+  const rmFilter = $("master-rm-filter").value;
+  const rows = awayVisible().filter((a) => awayCovers(a, day) && (!rmFilter || a.ownerEmail === rmFilter))
+    .sort((a, b) => (a.start || "").localeCompare(b.start || "") || (a.ownerName || "").localeCompare(b.ownerName || ""));
+  $("day-away-count").textContent = `${rows.length} entr${rows.length === 1 ? "y" : "ies"}`;
+  $("tbl-day-away").innerHTML = `<thead><tr><th>Who</th><th>When</th><th>Where</th><th>Reason</th></tr></thead><tbody>${
+    rows.length ? rows.map((a) => `<tr>
+      <td class="m-who">${esc(a.ownerName || a.ownerEmail)}${day === todayISO() && awayNowOn(a) ? ' <span class="tag tag-amber">Out now</span>' : ""}</td>
+      <td class="m-when">${esc(awayTime(a))}</td>
+      <td class="m-meet">${esc(a.title || "—")}</td>
+      <td class="wrap">${esc(a.notes || "")}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">Nobody logged as out of office this day.</td></tr>`
+  }</tbody>`;
+}
+// Keep "Out right now" current while the page stays open.
+setInterval(() => { if (state.page === "master") renderAwayNow(); if (state.page === "log") renderAwayMine(); }, 60000);
