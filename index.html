@@ -234,6 +234,38 @@
 
     <div class="log-right">
     <div class="log-right-sticky">
+    <section class="card away-card" id="away-card">
+      <div class="card-head">
+        <h2>Out of office</h2>
+        <span class="card-note">Stepping out for a few hours? Note it here.</span>
+      </div>
+      <form id="away-form" class="form away-form" novalidate>
+        <label class="field">
+          <span>Date</span>
+          <input type="date" id="aw-date" required />
+        </label>
+        <label class="field">
+          <span>From</span>
+          <input type="time" id="aw-start" required />
+        </label>
+        <label class="field">
+          <span>Until</span>
+          <input type="time" id="aw-end" required />
+        </label>
+        <label class="field aw-where">
+          <span>Where</span>
+          <input type="text" id="aw-where" placeholder="e.g. Noida Sector 62" maxlength="200" autocomplete="off" required />
+        </label>
+        <label class="field aw-why">
+          <span>Reason <em>optional</em></span>
+          <input type="text" id="aw-reason" placeholder="e.g. Client site visit" maxlength="300" autocomplete="off" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </form>
+      <p id="away-error" class="form-error away-error" hidden></p>
+      <div id="away-mine" class="away-list"></div>
+    </section>
+
     <section class="card plan-card">
       <div class="card-head">
         <h2>Plan for next working day</h2>
@@ -528,6 +560,8 @@
       <input type="date" id="export-to" class="month-input" title="Custom range: to" />
     </div>
 
+    <div id="away-now" class="away-now" hidden></div>
+
     <nav class="subtabs" id="master-subtabs" role="tablist">
       <button class="subtab" data-sub="dashboard" role="tab" aria-selected="true">Dashboard</button>
       <button class="subtab" data-sub="sheets" role="tab" aria-selected="false">Sheets</button>
@@ -608,6 +642,15 @@
         <input type="date" id="day-view-date" class="month-input" />
         <span class="lede" id="day-view-label"></span>
       </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Out of office</h2>
+          <span class="card-note" id="day-away-count"></span>
+        </div>
+        <div class="scroller"><table id="tbl-day-away" class="grid"></table></div>
+      </section>
+
 
       <section class="card">
         <div class="card-head"><h2 id="day-before-title">Before this day</h2></div>
