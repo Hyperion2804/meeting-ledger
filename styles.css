@@ -708,3 +708,23 @@ td.m-act{white-space:nowrap;text-align:right}
 tr.m-rem-empty td{padding:0 0 4px;border-bottom:1px solid var(--rule)}
 /* the planner's add button sits to the right, sized to its label */
 .agenda-form > .btn{justify-self:end}
+
+/* ---------------- out of office ---------------- */
+.away-form{grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
+.away-form .aw-where,.away-form .aw-why{grid-column:span 3}
+@media (min-width:1200px){
+  .away-form{grid-template-columns:150px 110px 110px minmax(0,1fr) minmax(0,1fr) auto}
+  .away-form .aw-where,.away-form .aw-why{grid-column:auto}
+}
+.away-error{margin:0 16px 12px}
+.away-list:empty{display:none}
+.away-list{border-top:1px solid var(--rule-soft)}
+.away-item{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--rule-soft)}
+.away-item:last-child{border-bottom:0}
+.away-when{font-size:13px;font-weight:600;color:var(--ink-2)}
+.away-where{font-size:13px;color:var(--ink-2);margin-top:2px}
+.away-reason{display:inline}
+.away-now{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-4px 0 16px}
+.away-now-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--amber)}
+.away-chip{font-size:12.5px;color:var(--ink-2);background:var(--amber-wash);border:1px solid var(--rule);border-radius:999px;padding:4px 11px}
+.away-chip b{font-weight:600;color:var(--ink)}
