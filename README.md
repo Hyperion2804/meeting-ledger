@@ -479,6 +479,16 @@ Removing a planned meeting or planner item offers **Undo** instead of a
 pop-up; signing out no longer asks. Client history closes with **Esc**.
 Toasts are announced to screen readers and leave the way they arrived.
 
+**Out of office.** On My meetings → Log, anyone stepping out for a few
+hours notes the date, from–until, where and an optional reason (it defaults
+to now → two hours later). **Back in office** ends it early. Master shows an
+**Out right now** strip on every view, and Day view lists everyone out that
+day — visible to the Observer, Team Leads (their reports), Admins and Super
+Admins; an RM sees only their own. Entries are saved as Hyperion Calendar
+"Out of office" items, so they appear there too (colleagues see just "Out
+of office"). Observers can read only these entries, never busy/leave/WFH —
+enforced in `firestore.rules`, so **republish the rules**.
+
 **Every table fits a laptop (1024px and up).** My history now uses the
 same layout as Master's Every meeting (Client · Meeting · Outcome, remarks
 underneath, Edit on the right). Master → Weekly plan, Master → Travel
