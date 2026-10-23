@@ -728,3 +728,14 @@ tr.m-rem-empty td{padding:0 0 4px;border-bottom:1px solid var(--rule)}
 .away-now-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--amber)}
 .away-chip{font-size:12.5px;color:var(--ink-2);background:var(--amber-wash);border:1px solid var(--rule);border-radius:999px;padding:4px 11px}
 .away-chip b{font-weight:600;color:var(--ink)}
+
+/* out of office: type switch + leave mode */
+.aw-kind{grid-column:1/-1;display:inline-flex;justify-self:start;padding:2px;border-radius:9px;background:var(--rule-soft);gap:2px}
+.aw-kind-btn{border:0;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--ink-3);padding:6px 12px;border-radius:7px;cursor:pointer}
+.aw-kind-btn[aria-checked="true"]{background:var(--paper-2);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+@media (min-width:1200px){
+  .away-form.is-leave{grid-template-columns:150px 150px minmax(0,1fr) auto}
+}
+.away-form.is-leave .aw-why{grid-column:span 3}
+@media (min-width:1200px){ .away-form.is-leave .aw-why{grid-column:auto} }
+.away-chip-leave{background:var(--rule-soft)}
