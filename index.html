@@ -237,28 +237,36 @@
     <section class="card away-card" id="away-card">
       <div class="card-head">
         <h2>Out of office</h2>
-        <span class="card-note">Stepping out for a few hours? Note it here.</span>
+        <span class="card-note">Stepping out or on leave? Note it here.</span>
       </div>
       <form id="away-form" class="form away-form" novalidate>
+        <div class="aw-kind" role="radiogroup" aria-label="Type">
+          <button type="button" class="aw-kind-btn" data-kind="ooo" role="radio" aria-checked="true">A few hours</button>
+          <button type="button" class="aw-kind-btn" data-kind="leave" role="radio" aria-checked="false">Leave (full days)</button>
+        </div>
         <label class="field">
-          <span>Date</span>
+          <span id="lbl-aw-date">Date</span>
           <input type="date" id="aw-date" required />
         </label>
-        <label class="field">
+        <label class="field aw-time">
           <span>From</span>
           <input type="time" id="aw-start" required />
         </label>
-        <label class="field">
+        <label class="field aw-time">
           <span>Until</span>
           <input type="time" id="aw-end" required />
+        </label>
+        <label class="field aw-leave" hidden>
+          <span>To</span>
+          <input type="date" id="aw-enddate" />
         </label>
         <label class="field aw-where">
           <span>Where</span>
           <input type="text" id="aw-where" placeholder="e.g. Noida Sector 62" maxlength="200" autocomplete="off" required />
         </label>
         <label class="field aw-why">
-          <span>Reason <em>optional</em></span>
-          <input type="text" id="aw-reason" placeholder="e.g. Client site visit" maxlength="300" autocomplete="off" />
+          <span><span id="lbl-aw-reason">Reason</span> <em>optional</em></span>
+          <input type="text" id="aw-reason" placeholder="e.g. Client site visit" maxlength="200" autocomplete="off" />
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Save</button>
       </form>
