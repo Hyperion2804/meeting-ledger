@@ -47,8 +47,8 @@ rules_version = '2';
 //               timings themselves are fixed in each app's config.js.
 //    calEvents  — Hyperion Calendar: busy blocks, leave, out of office,
 //               WFH. Everyone except Observer reads; owner writes.
-//               Observer reads "ooo" entries only — Meeting Ledger's
-//               out-of-office tracker writes these too.
+//               Observer reads "ooo" and "leave" entries only — Meeting
+//               Ledger's out-of-office tracker writes these too.
 //    busySlots  — availability-only mirror of planned meetings and
 //               approved trips, so the calendar can show "Meeting" /
 //               "Travelling" to colleagues without client details.
@@ -369,10 +369,10 @@ service cloud.firestore {
     // Everyone on the team (RM, Team Lead, Admin, Superadmin) reads every
     // entry — the calendar is for seeing who's free. Each person writes
     // only their own.
-    // Observer sees only "Out of office" entries (Meeting Ledger's tracker),
-    // never busy blocks, leave or WFH. Their query filters on kind == 'ooo'.
+    // Observer sees only "Out of office" and "Leave" entries (Meeting Ledger's
+    // tracker), never busy blocks or WFH. Their queries filter on kind.
     match /calEvents/{eventId} {
-      allow get, list: if canLog() || (isObserver() && resource.data.kind == 'ooo');
+      allow get, list: if canLog() || (isObserver() && resource.data.kind in ['ooo', 'leave']);
       allow create: if canLog()
         && request.resource.data.ownerEmail == callerEmail()
         && calEventValid(request.resource.data);
