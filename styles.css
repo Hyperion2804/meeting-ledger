@@ -739,3 +739,13 @@ tr.m-rem-empty td{padding:0 0 4px;border-bottom:1px solid var(--rule)}
 .away-form.is-leave .aw-why{grid-column:span 3}
 @media (min-width:1200px){ .away-form.is-leave .aw-why{grid-column:auto} }
 .away-chip-leave{background:var(--rule-soft)}
+
+/* PR Agency: the log form switches to the agency fields */
+#meeting-form.is-pr > :not(.pr-keep):not(#pr-fields):not(#form-error):not(.form-actions){display:none !important}
+#meeting-form.is-pr .pr-hide{display:none !important}
+.pr-fields{display:grid;gap:12px}
+.pr-note{margin:0;padding:10px 12px;border-radius:10px;background:var(--paper);border:1px solid var(--rule);color:var(--ink-2);font-size:13px;line-height:1.45}
+#tbl-pr-log td, #tbl-pr-master td{vertical-align:top}
+#tbl-pr-log td.m-dates, #tbl-pr-master td.m-dates{white-space:normal;font-size:13px;line-height:1.5;min-width:150px}
+#tbl-pr-log td.actions, #tbl-pr-master td.actions{white-space:nowrap;text-align:right}
+#tbl-pr-log td.actions .btn-link + .btn-link, #tbl-pr-master td.actions .btn-link + .btn-link{margin-left:10px}
