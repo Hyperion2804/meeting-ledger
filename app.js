@@ -16,10 +16,13 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const $ = (id) => document.getElementById(id);
-const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor
+const SEGMENTS = OPTIONS.personType;          // Wealth Manager, Channel Partner, Investor, OBPP
+const OBPP = "OBPP";                          // online bond platforms — deals, not the fund
+const PR_AGENCY = "PR Agency";                // log type that saves to the PR agency tracker instead
+const fmtCr = (v) => `₹${(Math.round((Number(v) || 0) * 100) / 100).toLocaleString("en-IN")} Cr`;
 const RESULTS = OPTIONS.result;               // Interested, To be followed up, Not Interested
 
-const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], colleagues: [], weekAgendas: [], travelPlans: [], holidays: new Map(), reportEmails: [], page: null, editingId: null };
+const state = { user: null, profile: null, meetings: [], team: [], plans: [], contacts: [], leads: [], myLeads: [], weeklyPlans: [], colleagues: [], weekAgendas: [], travelPlans: [], holidays: new Map(), reportEmails: [], prAgencies: [], page: null, editingId: null, editingPrId: null };
 const isAdminOrAbove = () => state.profile && ["admin", "superadmin"].includes(state.profile.role);
 const isObserver = () => state.profile && state.profile.role === "observer";
 const isTeamLead = () => state.profile && state.profile.role === "teamlead";
@@ -441,8 +444,20 @@ async function loadAll() {
     loadTravelPlans(),
     loadAway(),
     loadHolidays(),
+    loadPrAgencies(),
     canViewAll() ? loadTeam() : Promise.resolve()
   ]);
+}
+
+// PR agency tracker — everyone can read it. Never allowed to break the
+// rest of the load (e.g. if the rules for it aren't published yet).
+async function loadPrAgencies() {
+  try {
+    const snap = await getDocs(collection(db, "prAgencies"));
+    state.prAgencies = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    state.prAgencies = [];
+  }
 }
 
 // Holidays: every member can read them. Never allowed to break the rest of
@@ -564,8 +579,9 @@ function meetingRowsHtml(groups, fuIdx, o) {
     const meetLine = (x) => [x.personType, x.meetingType, x.mode].filter(Boolean).map(esc).join(" · ");
     const srcLine = (x) => sourceDetail(x) ? `Source: ${esc(sourceDetail(x))}` : "";
     const outcome = (x) => {
-      const docs = x.personType === "Investor" ? "Docs" : "Lead";
+      const docs = x.personType === "Investor" ? "Docs" : x.personType === OBPP ? "Deal" : "Lead";
       const parts = [resultTag(x.result)];
+      if (x.obppDeal) parts.push(`<span class="m-out">For: ${esc(x.obppDeal)}${x.obppAmount != null ? ` · ${esc(fmtCr(x.obppAmount))} indicated` : ""}</span>`);
       if (x.shared) parts.push(`<span class="m-out">${docs}: ${esc(x.shared)}</span>`);
       if (x.followUpDate) parts.push(`<span class="m-out">Follow-up <span class="m-date">${followUpCell(x, fuIdx)}</span></span>`);
       return parts.join("");
@@ -734,10 +750,10 @@ function summarise(rows) {
   const s = {
     total: rows.length, first: 0, followup: 0,
     seg: {}, byResult: {}, shared: {}, notShared: {}, done: {}, pending: {},
-    firstSeg: {}, followupSeg: {}
+    firstSeg: {}, followupSeg: {}, amount: {}
   };
   SEGMENTS.forEach((sg) => {
-    s.seg[sg] = 0; s.shared[sg] = 0; s.notShared[sg] = 0; s.done[sg] = 0; s.pending[sg] = 0;
+    s.seg[sg] = 0; s.shared[sg] = 0; s.notShared[sg] = 0; s.done[sg] = 0; s.pending[sg] = 0; s.amount[sg] = 0;
     s.firstSeg[sg] = 0; s.followupSeg[sg] = 0;
     s.byResult[sg] = {};
     RESULTS.forEach((r) => { s.byResult[sg][r] = 0; });
@@ -755,7 +771,11 @@ function summarise(rows) {
     if (r.result === "Interested") {
       if (r.shared === "Yes") s.shared[sg]++; else s.notShared[sg]++;
     }
-    if (r.shared === "Yes") {
+    if (sg === OBPP) {
+      // OBPP has no "meeting done / logged in" step; it records the amount
+      // indicated for the deal instead (₹ Cr).
+      s.amount[sg] += Number(r.obppAmount) || 0;
+    } else if (r.shared === "Yes") {
       if (r.progressed === "Yes") s.done[sg]++; else s.pending[sg]++;
     }
   }
@@ -767,7 +787,7 @@ function summarise(rows) {
 }
 
 // Investor uses different vocabulary (docs/logged in) than WM/CP (leads/meeting).
-const shareLabel = (sg) => sg === "Investor" ? ["Docs Shared", "No Docs"] : ["Lead Shared", "No Lead"];
+const shareLabel = (sg) => sg === "Investor" ? ["Docs Shared", "No Docs"] : sg === OBPP ? ["Deal Shared", "No Deal"] : ["Lead Shared", "No Lead"];
 const doneLabel = (sg) => sg === "Investor" ? ["Logged In", "Pending"] : ["Meeting Done", "Pending"];
 
 // One table per segment — Date/RM, Total, Interested/FU/NI, Shared/Not,
@@ -781,6 +801,7 @@ function renderSegmentTables(containerId, rowLabelHeader, rowDefs, totalsLabel) 
     const totalMeetings = firmUnique(rowDefs.flatMap((r) => r.meetings));   // a joint meeting counts once in the total
     const totalS = summarise(totalMeetings);
 
+    if (sg === OBPP) return obppSegmentBlock(sg, rowLabelHeader, rowDefs, totalsLabel);
     const head = `<tr>
       <th>${esc(rowLabelHeader)}</th>
       <th class="num">Total</th><th class="num">Interested</th>
@@ -816,7 +837,27 @@ function renderSegmentTables(containerId, rowLabelHeader, rowDefs, totalsLabel) 
   $(containerId).innerHTML = blocks;
 }
 
-/* Column contract — identical to the Data tab of Mastersheet.xlsx */
+// OBPP: Total · Interested · Not Interested · Deal shared / not · Amount indicated · First · Follow-up
+function obppSegmentBlock(sg, rowLabelHeader, rowDefs, totalsLabel) {
+  const rows = rowDefs.map(({ label, meetings }) => ({ label, s: summarise(meetings) }));
+  const totalS = summarise(firmUnique(rowDefs.flatMap((r) => r.meetings)));
+  const cells = (x) => `${n(x.seg[sg])}${n(x.byResult[sg]["Interested"])}${n(x.byResult[sg]["Not Interested"])}
+    ${n(x.shared[sg])}${n(x.notShared[sg])}<td class="num">${x.amount[sg] ? esc(fmtCr(x.amount[sg])) : '<span class="zero">0</span>'}</td>
+    ${n(x.firstSeg[sg])}${n(x.followupSeg[sg])}`;
+  const body = rows.filter((r) => r.s.seg[sg] > 0).map(({ label, s: x }) => `<tr><td>${esc(label)}</td>${cells(x)}</tr>`).join("");
+  return `<div class="segment-block">
+    <h3 class="segment-title">OBPP · online bond platforms</h3>
+    <div class="scroller"><table class="grid grid-dense">
+      <thead><tr><th>${esc(rowLabelHeader)}</th><th class="num">Total</th><th class="num">Interested</th><th class="num">Not Interested</th>
+        <th class="num">Deal Shared</th><th class="num">No Deal</th><th class="num">Amount indicated</th><th class="num">First</th><th class="num">Follow-up</th></tr></thead>
+      <tbody>${body || `<tr><td colspan="9" class="empty">Nothing for OBPP in this range.</td></tr>`}</tbody>
+      ${body ? `<tfoot><tr class="is-total"><td><strong>${esc(totalsLabel)}</strong></td>${cells(totalS)}</tr></tfoot>` : ""}
+    </table></div>
+  </div>`;
+}
+
+/* Column contract — identical to the Data tab of Mastersheet.xlsx, with the
+   OBPP columns added at the END so every earlier column keeps its place. */
 const DATA_HEADERS = [
   "Date", "Name", "Designation", "Employee ID", "Total Reachouts",
   "WM - Total", "CP - Total", "Investor - Total",
@@ -829,7 +870,9 @@ const DATA_HEADERS = [
   "WM - Meeting Done", "WM - Meeting Pending",
   "CP - Meeting Done", "CP - Meeting Pending",
   "Investor - Logged In", "Investor - Login Pending",
-  "First Meetings", "Follow-up Meetings"
+  "First Meetings", "Follow-up Meetings",
+  "OBPP - Total", "OBPP - Interested", "OBPP - Not Interested",
+  "OBPP - Deal Shared", "OBPP - Deal Not Shared", "OBPP - Amount Indicated (Rs Cr)"
 ];
 
 // Looks up a person's roster details for the export. Falls back gracefully
@@ -855,13 +898,19 @@ function summaryRow(date, roster, rows) {
     s.byResult[INV][RESULTS[0]], s.byResult[INV][RESULTS[1]], s.byResult[INV][RESULTS[2]],
     s.shared[WM], s.notShared[WM], s.shared[CP], s.notShared[CP], s.shared[INV], s.notShared[INV],
     s.done[WM], s.pending[WM], s.done[CP], s.pending[CP], s.done[INV], s.pending[INV],
-    s.first, s.followup
+    s.first, s.followup,
+    s.seg[OBPP], s.byResult[OBPP][RESULTS[0]], s.byResult[OBPP][RESULTS[2]],
+    s.shared[OBPP], s.notShared[OBPP], Math.round(s.amount[OBPP] * 100) / 100
   ];
 }
 
 /* ============================ RM: log ============================ */
-[["f-meetingType", "meetingType"], ["f-personType", "personType"], ["f-mode", "mode"],
+[["f-meetingType", "meetingType"], ["f-mode", "mode"],
  ["f-result", "result"]].forEach(([id, key]) => fillSelect($(id), OPTIONS[key]));
+// PR Agency sits in the same list but switches the form to the agency tracker.
+fillSelect($("f-personType"), [...OPTIONS.personType, PR_AGENCY]);
+fillSelect($("pr-status"), OPTIONS.prStatus);
+fillSelect($("pr-quoteState"), OPTIONS.prQuoteState);
 fillSelect($("f-source"), OPTIONS.source, { blank: true });
 fillSelect($("f-shared"), OPTIONS.shared, { blank: true });
 fillSelect($("f-progressed"), OPTIONS.progressed, { blank: true });
@@ -874,21 +923,52 @@ $("admin-month").value = thisMonth();
 
 let currentLeads = [];   // [{name, phone, status}] — only used while WM/CP + Lead Shared = Yes
 
+const isObpp = () => $("f-personType").value === OBPP;
+
+// OBPP outcomes are just Interested / Not Interested. Rebuild the result
+// list when the type changes, keeping the current pick where it still fits.
+function syncResultOptions() {
+  const sel = $("f-result");
+  const want = isObpp() ? OPTIONS.result.filter((r) => r !== "To be followed up") : OPTIONS.result;
+  const cur = sel.value;
+  if ([...sel.options].map((o) => o.value).join("|") === want.join("|")) return;
+  fillSelect(sel, want);
+  sel.value = want.includes(cur) ? cur : want[0];
+}
+
+// OBPP + Interested → which deal, and how much they indicated.
+function toggleObppFields() {
+  const on = isObpp() && $("f-result").value === "Interested";
+  $("field-obpp").hidden = !on;
+  $("f-obppDeal").required = on;
+  $("f-obppDeal").disabled = !on;
+  $("f-obppAmount").disabled = !on;
+  if (!on) { $("f-obppDeal").value = ""; $("f-obppAmount").value = ""; }
+}
+
 function syncLabels() {
+  syncPrMode();
+  if ($("f-personType").value === PR_AGENCY) return;
+  syncResultOptions();
   const investor = $("f-personType").value === "Investor";
-  $("lbl-shared").textContent = investor ? "Documents shared" : "Lead shared";
+  $("lbl-shared").textContent = investor ? "Documents shared" : isObpp() ? "Deal shared" : "Lead shared";
   $("lbl-progressed").textContent = investor ? "Logged in" : "Meeting with lead done";
   $("lbl-leads").textContent = investor ? "Documents shared this meeting" : "Leads shared this meeting";
   toggleContactMode();
-  toggleLeadsSection();
+  toggleNotInterestedField();
+  toggleSharedProgressed();
+  toggleObppFields();
 }
 
-// The Wealth Manager / Channel Partner registry. Investor never uses this —
+// The Wealth Manager / Channel Partner / OBPP registry. Investor never uses this —
 // every investor is logged fresh, there's no "existing investor" concept.
 let resolvedContact = null;   // the looked-up contacts/{id} doc, once Existing succeeds
 
-const isWmCp = () => $("f-personType").value === "Wealth Manager" || $("f-personType").value === "Channel Partner";
-const contactPrefix = () => $("f-personType").value === "Wealth Manager" ? "WM" : "CP";
+// Has a contact registry (New / Existing lookup): WM, CP and OBPP.
+const isWmCp = () => ["Wealth Manager", "Channel Partner", OBPP].includes($("f-personType").value);
+// Leads (people handed over to meet) only apply to WM and CP.
+const leadsType = () => $("f-personType").value === "Wealth Manager" || $("f-personType").value === "Channel Partner";
+const contactPrefix = () => ({ "Wealth Manager": "WM", "Channel Partner": "CP", [OBPP]: "OB" })[$("f-personType").value] || "CP";
 
 function setContactFieldsEditable(editable) {
   ["f-prospectName", "f-phone", "f-email", "f-address"].forEach((id) => { $(id).readOnly = !editable; });
@@ -1035,7 +1115,8 @@ $("btn-lookup-source").addEventListener("click", lookupSourceContact);
 
 // Result = Not Interested → ask why. Otherwise the field is meaningless.
 function toggleNotInterestedField() {
-  const on = $("f-result").value === "Not Interested";
+  const ni = $("f-result").value === "Not Interested";
+  const on = ni && !isObpp();   // the reasons list is about the fund — not asked for OBPP
   $("field-notinterested").hidden = !on;
   $("f-notInterestedReason").required = on;
   $("f-notInterestedReason").disabled = !on;
@@ -1043,8 +1124,8 @@ function toggleNotInterestedField() {
   // Nothing to follow up on a Not Interested meeting, so the date becomes
   // optional there (an RM can still set one for a deliberate revisit).
   // Required for Interested and To be followed up, as before.
-  $("f-followUpDate").required = !on;
-  $("lbl-followUpOptional").hidden = !on;
+  $("f-followUpDate").required = !ni;
+  $("lbl-followUpOptional").hidden = !ni;
 }
 
 // Shared/progressed only make sense once the person is Interested — for
@@ -1060,9 +1141,9 @@ function toggleSharedProgressed() {
 // Meeting Done / Logged In only makes sense once a lead or doc was
 // actually shared — "Not yet" or "No" turns this off automatically.
 function toggleProgressedField() {
-  const wmcp = $("f-personType").value === "Wealth Manager" || $("f-personType").value === "Channel Partner";
-  const leadsApply = wmcp && $("f-shared").value === "Yes";
-  const on = $("f-shared").value === "Yes" && !leadsApply;
+  const leadsApply = leadsType() && $("f-shared").value === "Yes";
+  // OBPP has no "done / logged in" step after a deal is shared.
+  const on = $("f-shared").value === "Yes" && !leadsApply && !isObpp();
   $("field-progressed").hidden = !on;
   $("f-progressed").disabled = !on;
   $("f-progressed").required = on;
@@ -1074,8 +1155,7 @@ function toggleProgressedField() {
 // Each lead carries its own Meeting Done/Pending + expected meeting date,
 // which replaces the single top-level "Meeting done" field above.
 function toggleLeadsSection() {
-  const wmcp = $("f-personType").value === "Wealth Manager" || $("f-personType").value === "Channel Partner";
-  const on = wmcp && $("f-shared").value === "Yes";
+  const on = leadsType() && $("f-shared").value === "Yes";
   $("field-leads").hidden = !on;
   if (!on) { currentLeads = []; }
   renderLeadsList();
@@ -1128,7 +1208,7 @@ $("btn-add-lead").addEventListener("click", () => {
 
 $("f-personType").addEventListener("change", syncLabels);
 $("f-source").addEventListener("change", () => { toggleReferenceField(); toggleSourceContactField(); toggleSourceOtherField(); });
-$("f-result").addEventListener("change", () => { toggleNotInterestedField(); toggleSharedProgressed(); });
+$("f-result").addEventListener("change", () => { toggleNotInterestedField(); toggleSharedProgressed(); toggleObppFields(); });
 $("f-shared").addEventListener("change", toggleProgressedField);
 syncLabels();
 toggleReferenceField();
@@ -1140,6 +1220,8 @@ $("btn-cancel").addEventListener("click", resetForm);
 
 function resetForm() {
   state.editingId = null;
+  state.editingPrId = null;
+  clearPrFields();
   currentLeads = [];
   resolvedContact = null;
   resolvedSourceContact = null;
@@ -1370,9 +1452,11 @@ $("meeting-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = $("form-error");
   err.hidden = true;
+  if ($("f-personType").value === PR_AGENCY) { await savePrAgency(); return; }
 
   const wmcp = isWmCp();
-  const leadsApply = wmcp && $("f-shared").value === "Yes";
+  const obpp = isObpp();
+  const leadsApply = leadsType() && $("f-shared").value === "Yes";
   const contactMode = wmcp ? $("f-contactMode").value : "";
 
   const payload = {
@@ -1391,7 +1475,9 @@ $("meeting-form").addEventListener("submit", async (e) => {
     result: $("f-result").value,
     notInterestedReason: $("f-result").value === "Not Interested" ? $("f-notInterestedReason").value : "",
     shared: $("f-result").value === "Interested" ? $("f-shared").value : "",
-    progressed: $("f-shared").value === "Yes" ? $("f-progressed").value : "",
+    progressed: $("f-shared").value === "Yes" && !obpp ? $("f-progressed").value : "",
+    obppDeal: obpp && $("f-result").value === "Interested" ? $("f-obppDeal").value.trim() : "",
+    obppAmount: obpp && $("f-result").value === "Interested" && $("f-obppAmount").value !== "" ? Number($("f-obppAmount").value) : null,
     contactMode, contactId: "",   // contactId filled in once resolved below
     followUpDate: $("f-followUpDate").value,
     remarks: $("f-remarks").value.trim(),
@@ -1432,17 +1518,32 @@ $("meeting-form").addEventListener("submit", async (e) => {
     payload.sourceContactId = resolvedSourceContact.id;
     payload.sourceContactName = resolvedSourceContact.name || "";
   }
-  if (payload.result === "Not Interested" && !payload.notInterestedReason) {
+  if (payload.result === "Not Interested" && !obpp && !payload.notInterestedReason) {
     err.textContent = "Pick a reason they're not interested.";
     err.hidden = false;
     return;
   }
   if (payload.result === "Interested" && !payload.shared) {
-    err.textContent = "Say whether a lead or document was shared.";
+    err.textContent = obpp ? "Say whether a deal was shared." : "Say whether a lead or document was shared.";
     err.hidden = false;
     return;
   }
-  if (payload.shared === "Yes" && !leadsApply && !payload.progressed) {
+  if (obpp && payload.result === "Interested" && !payload.obppDeal) {
+    err.textContent = "Add which deal they're interested in.";
+    err.hidden = false;
+    return;
+  }
+  if (obpp && payload.result === "To be followed up") {
+    err.textContent = "OBPP meetings are Interested or Not Interested.";
+    err.hidden = false;
+    return;
+  }
+  if (payload.obppAmount != null && !(payload.obppAmount >= 0)) {
+    err.textContent = "Enter the amount indicated in ₹ Cr, or leave it blank.";
+    err.hidden = false;
+    return;
+  }
+  if (payload.shared === "Yes" && !leadsApply && !obpp && !payload.progressed) {
     err.textContent = "Say whether the meeting is done or still pending.";
     err.hidden = false;
     return;
@@ -1620,7 +1721,8 @@ function renderLog() {
       <div class="entry-top">
         <span class="entry-name">${esc(r.prospectName)}</span>
         ${resultTag(r.result)}
-        ${r.shared === "Yes" ? `<span class="tag tag-flat">${r.personType === "Investor" ? "Docs shared" : "Lead shared"}</span>` : ""}
+        ${r.shared === "Yes" ? `<span class="tag tag-flat">${r.personType === "Investor" ? "Docs shared" : r.personType === OBPP ? "Deal shared" : "Lead shared"}</span>` : ""}
+        ${r.obppDeal ? `<span class="tag tag-flat">${esc(r.obppDeal)}${r.obppAmount != null ? ` · ${esc(fmtCr(r.obppAmount))}` : ""}</span>` : ""}
         ${r.progressed === "Yes" ? `<span class="tag tag-green">${r.personType === "Investor" ? "Logged in" : "Met"}</span>` : ""}
       </div>
       <div class="entry-meta">${bits} · ${esc(r.phone)}${r.email ? " · " + esc(r.email) : ""} · ${esc(r.address)}</div>
@@ -1697,11 +1799,208 @@ function startEdit(id) {
   // based on result, but startEdit needs the loaded values to survive that.
   $("f-shared").value = r.shared || "";
   $("f-progressed").value = r.progressed || "";
+  toggleProgressedField();
+  $("f-progressed").value = r.progressed || "";
+  toggleObppFields();
+  $("f-obppDeal").value = r.obppDeal || "";
+  $("f-obppAmount").value = r.obppAmount != null ? r.obppAmount : "";
   toggleContactMode();
   toggleLeadsSection();
   checkDuplicateFirstMeeting();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
+
+
+/* ============================ PR agency tracker ============================ */
+// Picked as "PR Agency" in the log's person-type list. The form switches to
+// the agency fields; saving writes one row per agency to prAgencies (not a
+// meeting, never counted in sales numbers). Everyone can see the tracker;
+// anyone who logs can update a row as the quote and discussions progress.
+const PR_TEXT = { agencyName: "pr-agency", contactPerson: "pr-contact", designation: "pr-designation",
+  email: "pr-email", callDate: "pr-callDate", status: "pr-status", quoteState: "pr-quoteState",
+  quoteDate: "pr-quoteDate", discussDate: "pr-discussDate", discussComments: "pr-discussComments",
+  credentials: "pr-credentials", validations: "pr-validations", exclusion: "pr-exclusion" };
+const fmtINR = (v) => `₹${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
+const prSeconds = (r) => (r.createdAt && typeof r.createdAt.seconds === "number") ? r.createdAt.seconds : Number.MAX_SAFE_INTEGER;
+// Serial number by when each agency was first added — stable across filters.
+const prSerials = () => new Map([...state.prAgencies].sort((a, b) => prSeconds(a) - prSeconds(b)).map((r, i) => [r.id, i + 1]));
+
+function clearPrFields() {
+  Object.values(PR_TEXT).forEach((id) => { $(id).value = ""; });
+  $("pr-phone").value = "";
+  $("pr-amount").value = "";
+  $("pr-status").value = OPTIONS.prStatus[0];
+  $("pr-quoteState").value = OPTIONS.prQuoteState[0];
+  syncPrQuoteLabel();
+}
+
+function syncPrQuoteLabel() {
+  $("lbl-pr-quoteDate").textContent = $("pr-quoteState").value === "Received" ? "Quote received on" : "Quote expected on";
+}
+$("pr-quoteState").addEventListener("change", syncPrQuoteLabel);
+
+// Swap the meeting form for the agency fields (and back). The meeting
+// fields stay in the DOM, hidden by CSS, so switching back loses nothing.
+function syncPrMode() {
+  const on = $("f-personType").value === PR_AGENCY;
+  $("meeting-form").classList.toggle("is-pr", on);
+  $("pr-fields").hidden = !on;
+  $("dup-first-warning").hidden = on || $("dup-first-warning").hidden;
+  if (state.editingPrId && !on) { state.editingPrId = null; clearPrFields(); }
+  const editing = on ? !!state.editingPrId : !!state.editingId;
+  $("btn-save").textContent = on ? (editing ? "Update agency" : "Save agency") : (editing ? "Update meeting" : "Save meeting");
+}
+
+async function savePrAgency() {
+  const err = $("form-error");
+  const v = {};
+  Object.entries(PR_TEXT).forEach(([k, id]) => { v[k] = $(id).value.trim(); });
+  v.phone = phoneDigitsOf($("pr-phone").value);
+  const amt = $("pr-amount").value;
+  v.amount = amt === "" ? null : Number(amt);
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  if (!v.agencyName) return fail("Add the name of the agency.");
+  if (!v.contactPerson) return fail("Add the contact person's name.");
+  if (v.phone.length !== 10) return fail("Enter a valid 10-digit contact number.");
+  if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) return fail("Enter a valid email address.");
+  if (v.amount != null && !(v.amount >= 0)) return fail("Enter the quote amount in ₹, or leave it blank.");
+
+  const me = state.profile.name || state.user.email;
+  const editingId = state.editingPrId;
+  $("btn-save").disabled = true;
+  try {
+    if (editingId) {
+      await updateDoc(doc(db, "prAgencies", editingId), { ...v, updatedByName: me, updatedAt: serverTimestamp() });
+    } else {
+      await addDoc(collection(db, "prAgencies"), {
+        ...v, createdByEmail: state.user.email, createdByName: me, updatedByName: me,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    }
+    await loadPrAgencies();
+    renderPrAgencies();
+    resetForm();
+    $("f-personType").value = PR_AGENCY;
+    syncLabels();
+    toast(editingId ? `Updated ${v.agencyName}` : `Saved ${v.agencyName} to PR agencies`);
+  } catch (e) {
+    fail("Couldn't save the agency. " + (e.message || ""));
+  } finally {
+    $("btn-save").disabled = false;
+  }
+}
+
+function startPrEdit(id) {
+  const r = state.prAgencies.find((x) => x.id === id);
+  if (!r) return;
+  resetForm();
+  if (state.page !== "log") show("log");
+  document.querySelector('#log-subtabs [data-sub="log"]').click();
+  $("f-personType").value = PR_AGENCY;
+  state.editingPrId = id;
+  Object.entries(PR_TEXT).forEach(([k, elId]) => { $(elId).value = r[k] || ""; });
+  if (!r.status) $("pr-status").value = OPTIONS.prStatus[0];
+  if (!r.quoteState) $("pr-quoteState").value = OPTIONS.prQuoteState[0];
+  $("pr-phone").value = r.phone || "";
+  $("pr-amount").value = r.amount != null ? r.amount : "";
+  syncPrQuoteLabel();
+  syncLabels();
+  $("btn-cancel").hidden = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function deletePrAgency(id) {
+  const r = state.prAgencies.find((x) => x.id === id);
+  if (!r) return;
+  const { id: _id, ...saved } = r;
+  try {
+    await deleteDoc(doc(db, "prAgencies", id));
+    state.prAgencies = state.prAgencies.filter((x) => x.id !== id);
+    renderPrAgencies();
+    toast(`Removed ${r.agencyName}`, { label: "Undo", run: async () => {
+      try {
+        await setDoc(doc(db, "prAgencies", id), saved);
+        await loadPrAgencies();
+        renderPrAgencies();
+        toast("Restored");
+      } catch (e2) { toast("Couldn't restore that. " + (e2.message || "")); }
+    } });
+  } catch (e) { toast("Couldn't remove that. " + (e.message || "")); }
+}
+
+const prStatusTag = (st) => {
+  const cls = st === "Selected" ? "tag-green" : st === "Rejected" ? "tag-rust" : st === "Shortlisted" ? "tag-amber" : "tag-flat";
+  return `<span class="tag ${cls}">${esc(st || OPTIONS.prStatus[0])}</span>`;
+};
+
+// No. | Agency (contact, designation, phone · email) | Dates | Quote | Status | actions
+// with a notes row underneath for the long text fields — five columns, so
+// nothing scrolls sideways at laptop widths.
+function renderPrAgencies() {
+  const serial = prSerials();
+  const rows = [...state.prAgencies].sort((a, b) => serial.get(a.id) - serial.get(b.id));
+  const canEdit = canLogHere();
+  const canDelete = (r) => isAdminOrAbove() || r.createdByEmail === state.user.email;
+  const dateLine = (label, iso) => iso ? `<div><span class="m-sub">${label}</span> ${esc(fmtDMY(iso))}</div>` : "";
+  const html = rows.map((r) => {
+    const contact = [r.phone, r.email].filter(Boolean).map(esc).join(" · ");
+    const notes = [["Discussion comments", r.discussComments], ["Credential feedback", r.credentials],
+      ["Validations", r.validations], ["Exclusion", r.exclusion]].filter(([, t]) => t && t.trim());
+    const actions = [
+      canEdit ? `<button type="button" class="btn-link" data-pr-edit="${esc(r.id)}">Edit</button>` : "",
+      canDelete(r) ? `<button type="button" class="btn-link danger" data-pr-delete="${esc(r.id)}">Remove</button>` : ""
+    ].filter(Boolean).join("");
+    return `<tr class="${notes.length ? "m-main" : ""}">
+      <td class="num">${serial.get(r.id)}</td>
+      <td class="name">${esc(r.agencyName)}
+        <div class="m-sub">${esc(r.contactPerson || "")}${r.designation ? `, ${esc(r.designation)}` : ""}</div>
+        ${contact ? `<div class="m-sub">${contact}</div>` : ""}</td>
+      <td class="m-dates">${dateLine("Requirement call", r.callDate)}
+        ${dateLine(r.quoteState === "Received" ? "Quote received" : "Quote expected", r.quoteDate)}
+        ${dateLine("Quote discussion", r.discussDate)}
+        ${!r.callDate && !r.quoteDate && !r.discussDate ? '<span class="m-sub">—</span>' : ""}</td>
+      <td class="num">${r.amount != null ? `${esc(fmtINR(r.amount))}<div class="m-sub">+ GST</div>` : '<span class="m-sub">—</span>'}</td>
+      <td>${prStatusTag(r.status)}<div class="m-sub">by ${esc(r.updatedByName || r.createdByName || "")}</div></td>
+      <td class="actions">${actions}</td>
+    </tr>${notes.length ? `<tr class="m-rem"><td></td><td colspan="5"><div class="rem-box">${notes.map(([l, t]) =>
+      `<div class="rem-line"><div class="rem-text"><span class="joint-who">${esc(l)}:</span> ${esc(t)}</div><button type="button" class="rem-more" hidden>Show more</button></div>`).join("")}</div></td></tr>` : ""}`;
+  }).join("");
+  const head = `<thead><tr><th class="num">No.</th><th>Agency &amp; contact</th><th>Dates</th>
+    <th class="num">Quote</th><th>Status</th><th></th></tr></thead>`;
+  const empty = `<tr><td colspan="6" class="empty">No PR agencies yet.${canEdit ? " Pick “PR Agency” as the meeting person type in Log to add one." : ""}</td></tr>`;
+  ["tbl-pr-log", "tbl-pr-master"].forEach((tid) => {
+    const t = $(tid);
+    if (!t) return;
+    t.innerHTML = `${head}<tbody>${html || empty}</tbody>`;
+    t.querySelectorAll("[data-pr-edit]").forEach((b) => b.addEventListener("click", () => startPrEdit(b.dataset.prEdit)));
+    t.querySelectorAll("[data-pr-delete]").forEach((b) => b.addEventListener("click", () => deletePrAgency(b.dataset.prDelete)));
+    wireRemarks(t);
+  });
+  const label = `${rows.length} agenc${rows.length === 1 ? "y" : "ies"}`;
+  ["pr-count-log", "pr-count-master"].forEach((id) => { if ($(id)) $(id).textContent = label; });
+}
+
+function exportPrAgencies() {
+  if (typeof XLSX === "undefined") { toast("Excel library didn't load. Check your connection."); return; }
+  const serial = prSerials();
+  const rows = [...state.prAgencies].sort((a, b) => serial.get(a.id) - serial.get(b.id));
+  if (!rows.length) { toast("No PR agencies to export yet."); return; }
+  const sheet = [["S No", "Name of Agency", "Name of Contact Person", "Designation", "Contact Number", "Email",
+    "Requirement Gathering Call Date", "Quote Received/Expected", "Quote Received/Expected Date",
+    "Quote Discussion Date", "Quote Discussion Comments", "Credential Feedback", "Validations",
+    "Exclusion", "Quote Amount (Rs, excl. GST)", "Status"]];
+  rows.forEach((r) => sheet.push([
+    serial.get(r.id), r.agencyName || "", r.contactPerson || "", r.designation || "", r.phone || "", r.email || "",
+    fmtDMY(r.callDate), r.quoteState || "", fmtDMY(r.quoteDate), fmtDMY(r.discussDate),
+    r.discussComments || "", r.credentials || "", r.validations || "", r.exclusion || "",
+    r.amount != null ? r.amount : "", r.status || ""
+  ]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet), "PR Agencies");
+  XLSX.writeFile(wb, `PR Agencies ${todayISO()}.xlsx`);
+  toast("Workbook downloaded");
+}
+document.querySelectorAll("[data-pr-export]").forEach((b) => b.addEventListener("click", exportPrAgencies));
 
 
 /* ============================ busy slots (for Hyperion Calendar) ============================ */
@@ -2573,8 +2872,9 @@ async function decideTravelPlan(id, decision) {
 }
 
 /* ============================ RM: plan for the next working day ============================ */
-const PLAN_FIELDS = ["newChannel", "newCustomer", "fuChannel", "fuCustomer"];
-const PLAN_INPUT = { newChannel: "p-newChannel", newCustomer: "p-newCustomer", fuChannel: "p-fuChannel", fuCustomer: "p-fuCustomer" };
+// obpp = OBPP meetings (first and follow-up together) — its own bucket.
+const PLAN_FIELDS = ["newChannel", "newCustomer", "fuChannel", "fuCustomer", "obpp"];
+const PLAN_INPUT = { newChannel: "p-newChannel", newCustomer: "p-newCustomer", fuChannel: "p-fuChannel", fuCustomer: "p-fuCustomer", obpp: "p-obpp" };
 
 function updatePlanTotal() {
   const total = PLAN_FIELDS.reduce((sum, k) => sum + (parseInt($(PLAN_INPUT[k]).value, 10) || 0), 0);
@@ -2699,7 +2999,7 @@ async function logFollowUp(meetingId) {
   toggleNotInterestedField();
   toggleSharedProgressed();
 
-  const wmcp = r.personType === "Wealth Manager" || r.personType === "Channel Partner";
+  const wmcp = ["Wealth Manager", "Channel Partner", OBPP].includes(r.personType);
   contactModeTouched = true;
   if (wmcp && r.contactId) {
     // Same registered contact, looked up live so it reflects the registry
@@ -2780,6 +3080,8 @@ $("log-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("log-panel-leads").hidden = logSub !== "leads";
     $("log-panel-weeklyplan").hidden = logSub !== "weeklyplan";
     $("log-panel-travelplan").hidden = logSub !== "travelplan";
+    $("log-panel-pr").hidden = logSub !== "pr";
+    if (logSub === "pr") renderPrAgencies();
     if (logSub === "weeklyplan") renderWeeklyPlan();
     if (logSub === "travelplan") renderTravelPlan();
   }));
@@ -2849,11 +3151,12 @@ function exportMyHistory() {
   const sheet = [["Date", "Name", "Meeting Person Type", "Phone", "Email", "Address",
     "Type of Meeting", "Mode", "Prospect source", "Reference Name", "Meeting Result",
     "Not Interested Reason", "Lead / Docs Shared", "Meeting Done / Logged In",
-    "Follow up Date", "Remarks"]];
+    "Follow up Date", "Remarks", "OBPP Deal", "OBPP Amount Indicated (Rs Cr)"]];
   rows.forEach((r) => sheet.push([
     fmtDMY(r.date), r.prospectName, r.personType, r.phone || "", r.email || "", r.address || "",
     r.meetingType, r.mode, r.source || "", r.referenceName || "", r.result,
-    r.notInterestedReason || "", r.shared || "", r.progressed || "", fmtDMY(r.followUpDate), r.remarks || ""
+    r.notInterestedReason || "", r.shared || "", r.progressed || "", fmtDMY(r.followUpDate), r.remarks || "",
+    r.obppDeal || "", r.obppAmount != null ? r.obppAmount : ""
   ]));
   if (sheet.length === 1) { toast("Nothing to export in that range."); return; }
 
@@ -2981,6 +3284,8 @@ $("master-subtabs").querySelectorAll(".subtab").forEach((b) =>
     $("master-panel-day").hidden = masterSub !== "day";
     $("master-panel-weeklyplan").hidden = masterSub !== "weeklyplan";
     $("master-panel-travelplan").hidden = masterSub !== "travelplan";
+    $("master-panel-pr").hidden = masterSub !== "pr";
+    if (masterSub === "pr") renderPrAgencies();
     if (masterSub === "day") renderDayView();
     if (masterSub === "weeklyplan") renderMasterWeeklyPlan();
     if (masterSub === "travelplan") renderMasterTravelPlan();
@@ -3079,7 +3384,7 @@ function renderCharts(from, to, rows, s, rmRows) {
   drawChart("chart-type", {
     type: "doughnut",
     data: { labels: SEGMENTS, datasets: [{
-      data: typeVals, backgroundColor: [GOLD_DEEP, GOLD, AMBER], borderColor: PAPER, borderWidth: 2
+      data: typeVals, backgroundColor: [GOLD_DEEP, GOLD, AMBER, GREEN], borderColor: PAPER, borderWidth: 2
     }] },
     options: {
       responsive: true, maintainAspectRatio: false, cutout: "62%",
@@ -3435,7 +3740,7 @@ function exportWorkbook() {
   // Master rollup: one row per day in range, roster columns dropped since
   // they don't apply to an all-RM total.
   const rollupCols = [0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36];
   const master = [rollupCols.map((i) => DATA_HEADERS[i])];
   eachDateISO(from, to).forEach((iso) => {
     const drows = firmRows.filter((r) => r.date === iso);
@@ -3449,7 +3754,7 @@ function exportWorkbook() {
   const detail = [["Date", "RM", "Designation", "Employee ID", "Name", "Meeting Person Type",
     "Phone", "Email", "Address", "Type of Meeting", "Mode", "Prospect source", "Reference Name",
     "Meeting Result", "Not Interested Reason", "Lead / Docs Shared", "Meeting Done / Logged In",
-    "Follow up Date", "Remarks", "Joint meeting"]];
+    "Follow up Date", "Remarks", "Joint meeting", "OBPP Deal", "OBPP Amount Indicated (Rs Cr)"]];
   [...rows].sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
     const ru = rosterLookup(r.rmEmail);
     detail.push([
@@ -3457,7 +3762,8 @@ function exportWorkbook() {
       r.phone || "", r.email || "", r.address || "", r.meetingType, r.mode, r.source || "",
       r.referenceName || "", r.result, r.notInterestedReason || "", r.shared || "", r.progressed || "",
       fmtDMY(r.followUpDate), r.remarks || "",
-      r._joint ? `Also logged by ${r._jointWith.join(", ")}${r._firmPrimary ? " (counted in Master)" : " (Master counts the first entry)"}` : ""
+      r._joint ? `Also logged by ${r._jointWith.join(", ")}${r._firmPrimary ? " (counted in Master)" : " (Master counts the first entry)"}` : "",
+      r.obppDeal || "", r.obppAmount != null ? r.obppAmount : ""
     ]);
   });
 
@@ -3544,7 +3850,7 @@ function renderTomorrowTarget(day, rmFilter) {
     const p = plannedByEmail.get(u.email) || {};
     const total = PLAN_FIELDS.reduce((sum, k) => sum + (p[k] || 0), 0);
     return `<tr><td class="name">${esc(u.name || u.email)}</td>
-      ${n(p.newChannel)}${n(p.newCustomer)}${n(p.fuChannel)}${n(p.fuCustomer)}
+      ${n(p.newChannel)}${n(p.newCustomer)}${n(p.fuChannel)}${n(p.fuCustomer)}${n(p.obpp)}
       <td class="num">${total}</td></tr>`;
   }).join("");
 
@@ -3552,8 +3858,9 @@ function renderTomorrowTarget(day, rmFilter) {
     <th>Relationship manager</th>
     <th class="num">New Channel</th><th class="num">New Customer</th>
     <th class="num">Follow-up Channel</th><th class="num">Follow-up Customer</th>
+    <th class="num">OBPP</th>
     <th class="num">Total planned</th>
-    </tr></thead><tbody>${body || `<tr><td colspan="6" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
+    </tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
 }
 
 // Shared by both callers below — takes already-filtered rows/plans and
@@ -3572,6 +3879,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
   // buckets the RM planned against, so Planned and Actual are apples to apples.
   const isChannel = (r) => r.personType === "Wealth Manager" || r.personType === "Channel Partner";
   const bucketOf = (r) => {
+    if (r.personType === OBPP) return "obpp";   // OBPP is its own bucket, first and follow-up together
     const chan = isChannel(r) ? "Channel" : "Customer";
     const stage = r.meetingType === "Follow-up" ? "fu" : "new";
     return stage === "new" ? (chan === "Channel" ? "newChannel" : "newCustomer") : (chan === "Channel" ? "fuChannel" : "fuCustomer");
@@ -3590,7 +3898,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
       unplannedByEmail.set(email, (unplannedByEmail.get(email) || 0) + 1);
       return;
     }
-    if (!actualByEmail.has(email)) actualByEmail.set(email, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0, total: 0 });
+    if (!actualByEmail.has(email)) actualByEmail.set(email, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0, obpp: 0, total: 0 });
     const bucket = actualByEmail.get(email);
     bucket[bucketOf(r)]++;
     bucket.total++;
@@ -3603,7 +3911,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
 
   const plannedByEmail = new Map();
   plansInRange.forEach((p) => {
-    if (!plannedByEmail.has(p.rmEmail)) plannedByEmail.set(p.rmEmail, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0 });
+    if (!plannedByEmail.has(p.rmEmail)) plannedByEmail.set(p.rmEmail, { newChannel: 0, newCustomer: 0, fuChannel: 0, fuCustomer: 0, obpp: 0 });
     const bucket = plannedByEmail.get(p.rmEmail);
     PLAN_FIELDS.forEach((k) => { bucket[k] += (p[k] || 0); });
   });
@@ -3625,7 +3933,7 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
     const pct = plannedTotal ? Math.round((actualTotal / plannedTotal) * 100) : null;
     return `<tr><td class="name">${esc(u.name || u.email)}</td>
       ${cell(p.newChannel, a.newChannel)}${cell(p.newCustomer, a.newCustomer)}
-      ${cell(p.fuChannel, a.fuChannel)}${cell(p.fuCustomer, a.fuCustomer)}
+      ${cell(p.fuChannel, a.fuChannel)}${cell(p.fuCustomer, a.fuCustomer)}${cell(p.obpp, a.obpp)}
       <td class="num">${plannedTotal} / ${actualTotal}</td>
       <td class="num">${pct === null ? "—" : pct + "%"}</td>
       <td class="num">${(plannedDays.get(u.email) || new Set()).size} / ${workingDaysFor(u.email)}</td>
@@ -3638,11 +3946,12 @@ function renderAchievementFromRows(tableId, rowsInRange, plansInRange, rmFilter,
     <th class="num">New Customer<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Follow-up Channel<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Follow-up Customer<br><span class="th-sub">Planned / Actual</span></th>
+    <th class="num">OBPP<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Total<br><span class="th-sub">Planned / Actual</span></th>
     <th class="num">Achievement<br><span class="th-sub">on planned days</span></th>
     <th class="num">Days planned<br><span class="th-sub">of working days</span></th>
     <th class="num">Unplanned<br><span class="th-sub">meetings</span></th>
-    </tr></thead><tbody>${body || `<tr><td colspan="9" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
+    </tr></thead><tbody>${body || `<tr><td colspan="10" class="empty">No one in this view yet.</td></tr>`}</tbody>`;
 }
 
 // Day view's single-day Achievement — unchanged in behaviour.
@@ -3750,8 +4059,8 @@ function renderContacts() {
   const mine = !hasWideView();
   const filter = $("contacts-filter").value;
   $("contacts-sub").textContent = mine
-    ? "Wealth Managers and Channel Partners you've registered."
-    : "Every Wealth Manager and Channel Partner on file, across the team.";
+    ? "Wealth Managers, Channel Partners and OBPPs you've registered."
+    : "Every Wealth Manager, Channel Partner and OBPP on file, across the team.";
 
   // Owner filter only makes sense when you can see more than your own —
   // for a plain RM the answer is always "just me," so hide it entirely.
