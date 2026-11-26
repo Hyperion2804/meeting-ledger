@@ -99,6 +99,7 @@
       <button class="subtab" data-sub="leads" role="tab" aria-selected="false">Leads</button>
       <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
       <button class="subtab" data-sub="travelplan" role="tab" aria-selected="false">Travel plan</button>
+      <button class="subtab" data-sub="pr" role="tab" aria-selected="false">PR agencies</button>
     </nav>
 
     <div id="log-panel-log" class="page-split">
@@ -119,12 +120,12 @@
             <select id="f-meetingType" required></select>
           </label>
         </div>
-        <div class="row row-2">
+        <div class="row row-2 pr-keep">
           <label class="field">
             <span>Meeting person type</span>
             <select id="f-personType" required></select>
           </label>
-          <label class="field">
+          <label class="field pr-hide">
             <span>Mode</span>
             <select id="f-mode" required></select>
           </label>
@@ -209,6 +210,17 @@
           </label>
         </div>
 
+        <div class="row row-2" id="field-obpp" hidden>
+          <label class="field">
+            <span>Deal interested in</span>
+            <input type="text" id="f-obppDeal" placeholder="Which deal?" maxlength="200" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Amount indicated <em>₹ Cr, optional</em></span>
+            <input type="number" id="f-obppAmount" min="0" step="0.01" placeholder="e.g. 5" />
+          </label>
+        </div>
+
         <div class="field" id="field-leads" hidden>
           <span id="lbl-leads">Leads shared this meeting</span>
           <div id="leads-list" class="leads-list"></div>
@@ -224,6 +236,80 @@
           <span>Remarks / next steps</span>
           <textarea id="f-remarks" rows="3" placeholder="What happens next?" required></textarea>
         </label>
+        <div id="pr-fields" class="pr-fields" hidden>
+          <p class="pr-note">PR agencies are tracked separately and don't count as sales meetings. Come back to the same agency to add the quote, discussion and feedback as they happen.</p>
+          <label class="field">
+            <span>Name of agency</span>
+            <input type="text" id="pr-agency" maxlength="200" autocomplete="off" required />
+          </label>
+          <div class="row row-2">
+            <label class="field">
+              <span>Contact person</span>
+              <input type="text" id="pr-contact" maxlength="120" autocomplete="off" required />
+            </label>
+            <label class="field">
+              <span>Designation <em>optional</em></span>
+              <input type="text" id="pr-designation" maxlength="120" autocomplete="off" />
+            </label>
+          </div>
+          <div class="row row-2">
+            <label class="field">
+              <span>Contact number</span>
+              <input type="tel" id="pr-phone" placeholder="10-digit mobile" autocomplete="off" required />
+            </label>
+            <label class="field">
+              <span>Email <em>optional</em></span>
+              <input type="email" id="pr-email" placeholder="name@agency.com" autocomplete="off" />
+            </label>
+          </div>
+          <div class="row row-2">
+            <label class="field">
+              <span>Requirement gathering call</span>
+              <input type="date" id="pr-callDate" />
+            </label>
+            <label class="field">
+              <span>Status</span>
+              <select id="pr-status"></select>
+            </label>
+          </div>
+          <div class="row row-2">
+            <label class="field">
+              <span>Quote</span>
+              <select id="pr-quoteState"></select>
+            </label>
+            <label class="field">
+              <span id="lbl-pr-quoteDate">Quote expected on</span>
+              <input type="date" id="pr-quoteDate" />
+            </label>
+          </div>
+          <div class="row row-2">
+            <label class="field">
+              <span>Quote discussion date</span>
+              <input type="date" id="pr-discussDate" />
+            </label>
+            <label class="field">
+              <span>Quote amount <em>₹, excl. GST</em></span>
+              <input type="number" id="pr-amount" min="0" step="1" placeholder="e.g. 150000" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Quote discussion comments</span>
+            <textarea id="pr-discussComments" rows="2"></textarea>
+          </label>
+          <label class="field">
+            <span>Credential feedback</span>
+            <textarea id="pr-credentials" rows="2"></textarea>
+          </label>
+          <label class="field">
+            <span>Validations <em>e.g. reference checks</em></span>
+            <textarea id="pr-validations" rows="2" maxlength="1000"></textarea>
+          </label>
+          <label class="field">
+            <span>Exclusion <em>what the quote doesn't cover</em></span>
+            <textarea id="pr-exclusion" rows="2" maxlength="1000"></textarea>
+          </label>
+        </div>
+
         <p id="form-error" class="form-error" hidden></p>
         <div class="form-actions">
           <button type="submit" id="btn-save" class="btn btn-primary">Save meeting</button>
@@ -297,12 +383,16 @@
           <input type="number" id="p-fuCustomer" min="0" step="1" value="0" required />
         </label>
         <label class="field">
+          <span>OBPP</span>
+          <input type="number" id="p-obpp" min="0" step="1" value="0" required />
+        </label>
+        <label class="field">
           <span>Planned total</span>
           <input type="number" id="p-total" readonly tabindex="-1" />
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Save plan</button>
       </form>
-      <p class="card-note">Channel = Wealth Manager / Channel Partner. Customer = Investor.</p>
+      <p class="card-note">Channel = Wealth Manager / Channel Partner. Customer = Investor. OBPP = online bond platforms.</p>
       <p id="plan-saved" class="signin-note" hidden></p>
     </section>
 
@@ -540,6 +630,19 @@
         </section>
       </div>
     </div>
+
+    <div id="log-panel-pr" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>PR agencies</h2>
+          <div class="page-head-controls">
+            <span class="card-note" id="pr-count-log"></span>
+            <button type="button" class="btn btn-ghost btn-sm" data-pr-export>Download Excel</button>
+          </div>
+        </div>
+        <div class="scroller"><table id="tbl-pr-log" class="grid"></table></div>
+      </section>
+    </div>
   </main>
 
   <!-- ---------------- ADMIN: MASTER ---------------- -->
@@ -576,6 +679,7 @@
       <button class="subtab" data-sub="day" role="tab" aria-selected="false">Day view</button>
       <button class="subtab" data-sub="weeklyplan" role="tab" aria-selected="false">Weekly plan</button>
       <button class="subtab" data-sub="travelplan" role="tab" aria-selected="false">Travel plans</button>
+      <button class="subtab" data-sub="pr" role="tab" aria-selected="false">PR agencies</button>
     </nav>
 
     <div id="master-panel-dashboard">
@@ -709,6 +813,7 @@
               <option value="Wealth Manager">Wealth Manager</option>
               <option value="Channel Partner">Channel Partner</option>
               <option value="Investor">Investor</option>
+              <option value="OBPP">OBPP</option>
             </select>
             <span class="card-note" id="day-all-count"></span>
           </div>
@@ -755,6 +860,19 @@
           <span class="card-note" id="master-travelplan-count"></span>
         </div>
         <div class="scroller"><table id="tbl-master-travelplan" class="grid"></table></div>
+      </section>
+    </div>
+
+    <div id="master-panel-pr" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>PR agencies</h2>
+          <div class="page-head-controls">
+            <span class="card-note" id="pr-count-master"></span>
+            <button type="button" class="btn btn-ghost btn-sm" data-pr-export>Download Excel</button>
+          </div>
+        </div>
+        <div class="scroller"><table id="tbl-pr-master" class="grid"></table></div>
       </section>
     </div>
   </main>
@@ -834,12 +952,12 @@
     <div class="page-head">
       <div>
         <h1 class="display">Contacts</h1>
-        <p class="lede" id="contacts-sub">Wealth Managers and Channel Partners on file.</p>
+        <p class="lede" id="contacts-sub">Wealth Managers, Channel Partners and OBPPs on file.</p>
       </div>
     </div>
 
     <nav class="subtabs" id="contacts-subtabs" role="tablist">
-      <button class="subtab" data-sub="wmcp" role="tab" aria-selected="true">WM / CP</button>
+      <button class="subtab" data-sub="wmcp" role="tab" aria-selected="true">WM / CP / OBPP</button>
       <button class="subtab" data-sub="investors" role="tab" aria-selected="false">Investors</button>
     </nav>
 
@@ -849,6 +967,7 @@
           <option value="all">All segments</option>
           <option value="Wealth Manager">Wealth Manager</option>
           <option value="Channel Partner">Channel Partner</option>
+          <option value="OBPP">OBPP</option>
         </select>
         <select id="contacts-owner-filter" class="month-input" hidden>
           <option value="all">All RMs</option>
