@@ -339,6 +339,27 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // ---------- PR agency tracker ----------
+    // Picked as "PR Agency" in Meeting Ledger's log. One document per agency,
+    // revisited as the quote and discussions progress — never a meeting.
+    // Everyone on the team can see it; anyone who logs meetings can add or
+    // update a row (the creator never changes). Removing is for the person
+    // who added it, or an Admin / Superadmin (who may also restore it).
+    match /prAgencies/{agencyId} {
+      allow get, list: if isMember();
+      allow create: if canLog()
+        && (request.resource.data.createdByEmail == callerEmail() || isAdminOrAbove())
+        && request.resource.data.agencyName is string
+        && request.resource.data.agencyName.size() > 0
+        && request.resource.data.agencyName.size() <= 200;
+      allow update: if canLog()
+        && request.resource.data.createdByEmail == resource.data.createdByEmail
+        && request.resource.data.agencyName is string
+        && request.resource.data.agencyName.size() > 0;
+      allow delete: if isAdminOrAbove()
+        || (canLog() && resource.data.createdByEmail == callerEmail());
+    }
+
     // ==================== HYPERION CALENDAR (separate app, same project) ====================
     // The calendar app shares this Firebase project so it can show Meeting
     // Ledger data (meetings, scheduled meetings, travel) without copying it.
