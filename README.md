@@ -1,6 +1,41 @@
 # Meeting Ledger
 
-## Latest update: office timings and holidays
+## Latest update: OBPP and PR agencies
+
+**Publish `firestore.rules` first** (Firebase Console → Firestore → Rules →
+paste → Publish), then upload the code. The same rules file goes into the
+Hyperion Calendar repo too.
+
+**OBPP (online bond platforms)** is a fourth meeting person type, for
+sale-side meetings pitching a specific deal (not the fund).
+- Result is Interested or Not Interested only. Interested asks *Deal shared*
+  (Yes / Not yet / No), *Deal interested in* (required) and *Amount
+  indicated* in ₹ Cr (optional). No "meeting done" step, no not-interested
+  reason, no leads.
+- OBPP contacts go in the registry with an `OB-<phone>` ID (New / Existing,
+  like WM and CP).
+- It has its own bucket in the next-day plan, Plan vs achievement and
+  Tomorrow's target (first and follow-up together).
+- Sheets show an OBPP table (Total, Interested, Not Interested, Deal shared,
+  No deal, Amount indicated, First, Follow-up). The Excel export adds six
+  OBPP columns **at the end** of Master and Data, so every earlier column
+  keeps its place; All Meetings and My history add the deal and amount.
+
+**PR Agency** is in the same person-type list but is not a meeting. Picking
+it swaps the form for the agency fields; saving adds a row to the **PR
+agencies** sub-tab (under My meetings and Master). One row per agency —
+click Edit to add the quote, discussion and feedback as they happen.
+- Fields: agency, contact person, designation, contact number, email,
+  requirement-gathering call date, quote expected / received + date, quote
+  discussion date and comments, credential feedback, validations,
+  exclusion, quote amount (₹, entered **excluding GST**, shown "+ GST"),
+  status (In discussion / Shortlisted / Selected / Rejected).
+- Everyone can see it, Observer included. Anyone who logs meetings can add
+  or edit. Remove is for whoever added it, or an Admin / Super Admin (with
+  Undo). Never counted in sales numbers. "Download Excel" exports the
+  tracker with the agreed headers.
+
+## Earlier update: office timings and holidays
 
 - **One office schedule for everyone** (RMs, Team Leads, Admins,
   Superadmins): Monday to Saturday 09:30–18:30; Sundays and the 2nd and
