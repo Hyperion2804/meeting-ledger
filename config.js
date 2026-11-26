@@ -27,7 +27,9 @@ export const OFFICE = {
 
 // 4. Dropdown values. These match the Excel sheets exactly.
 export const OPTIONS = {
-  personType:  ["Wealth Manager", "Channel Partner", "Investor"],
+  // OBPP = Online Bond Platforms: sale-side meetings pitching individual
+  // deals (not the fund) to bond platforms.
+  personType:  ["Wealth Manager", "Channel Partner", "Investor", "OBPP"],
   meetingType: ["First", "Follow-up"],
   mode:        ["Offline", "Online", "Call"],
   source:      ["Direct", "LinkedIn", "Reference", "Wealth Manager", "Channel Partner", "Cold Call", "Existing Client", "Event / Seminar", "Other"],
@@ -43,5 +45,9 @@ export const OPTIONS = {
     "Not Interested in Private Markets"
   ],
   leadStatus: ["Meeting Done", "Pending"],
-  contactMode: ["New", "Existing"]
+  contactMode: ["New", "Existing"],
+  // PR Agency tracker (picked as "PR Agency" in the log's person-type list;
+  // saved in its own tracker, never counted as a sales meeting).
+  prStatus:    ["In discussion", "Shortlisted", "Selected", "Rejected"],
+  prQuoteState: ["Expected", "Received"]
 };
